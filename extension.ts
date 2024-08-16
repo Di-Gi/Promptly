@@ -770,7 +770,6 @@ interface ResponsePart {
 	return selectedCells.map(cell => cell.document.getText()).join('\n\n');
   }
 
-  // Add a new function to extract code from Jupyter Notebook
   async function extractCodeFromNotebook(notebookEditor: NotebookEditor) {
 	const notebook = notebookEditor.notebook;
 	const cells = notebook.getCells();
