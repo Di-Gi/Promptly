@@ -1,4 +1,6 @@
-# Promptly: Intelligent Coding Assistant
+# Promptly: Intelligent Coding Assistant ![icon3](https://github.com/user-attachments/assets/838b719b-b863-4310-8a5f-be140960d230)
+
+
 
 Promptly is a powerful Visual Studio Code extension that integrates advanced AI capabilities into your coding workflow. It supports multiple AI models including Gemini AI, OpenAI's GPT, Anthropic's Claude, and local language models, providing intelligent assistance for various programming tasks.
 
@@ -21,9 +23,9 @@ Promptly is a powerful Visual Studio Code extension that integrates advanced AI 
 ## Quick Start
 
 1. After installation, open the Command Palette (Ctrl+Shift+P)
-2. Run "AI Chat: Switch Model" to select your preferred AI model
+2. Run "Promptly: Switch Model" to select your preferred AI model
 3. If using an API-based model, set up your API key in the settings
-4. For local models, run "AI Chat: Setup Local Model" and follow the prompts
+4. For local models, run "Promptly: Setup Local Model" and follow the prompts
 5. Start chatting with Ctrl+Shift+Z (Cmd+Shift+Z on Mac) or use the Command Palette
 
 ## Setup
@@ -38,16 +40,16 @@ Promptly is a powerful Visual Studio Code extension that integrates advanced AI 
 4. Enter your API key in the corresponding field (e.g., "Promptly: Gemini Api Key")
 
 ### Local Model Setup
-1. Run the command "AI Chat: Setup Local Model" from the Command Palette
+1. Run the command "Promptly: Setup Local Model" from the Command Palette
 2. Follow the prompts to select and configure your local model (Llama 3 or Mistral)
 
 ## Usage
 
-- Start a chat: Use Ctrl+Shift+Z (Cmd+Shift+Z on Mac) or run "AI Chat: Start Chat" from the Command Palette
-- Extract code from AI response: Use Ctrl+Shift+Q (Cmd+Shift+Q on Mac) or run "AI Chat: Extract Code from Last Response"
-- Enter prompt mode: Use Shift+. or run "AI Chat: Enter Prompt Mode"
-- Switch AI model: Run "AI Chat: Switch Model" from the Command Palette
-- Handle errors in Jupyter notebooks: Run "AI Chat: Handle Traceback Error" when an error occurs
+- Start a chat: Use Ctrl+Shift+Z (Cmd+Shift+Z on Mac) or run "Promptly: Start Chat" from the Command Palette
+- Extract code from AI response: Use Ctrl+Shift+Q (Cmd+Shift+Q on Mac) or run "Promptly: Extract Code from Last Response"
+- Enter prompt mode: Use Shift+. or run "Promptly: Enter Prompt Mode"
+- Switch AI model: Run "Promptly: Switch Model" from the Command Palette
+- Handle errors in Jupyter notebooks: Run "Promptly: Handle Traceback Error" when an error occurs
 
 ## Configuration
 
@@ -73,10 +75,6 @@ We welcome your feedback and bug reports! Please visit our [GitHub repository](h
 - Report issues
 - Suggest new features
 - Contribute to the project
-
-## Changelog
-
-See our [CHANGELOG.md](https://github.com/Di-GI/promptly/blob/main/CHANGELOG.md) for a detailed history of changes.
 
 ## Requirements
 
