@@ -1,0 +1,170 @@
+{
+  "name": "promptly",
+  "displayName": "Promptly",
+  "description": "Integrates AI directly into your code with intelligent chat, seamless generation, and efficient error handling.",
+  "version": "0.1.0",
+  "publisher": "DiGi",
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Machine Learning",
+    "Snippets",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "machine learning",
+    "code generation",
+    "gemini",
+    "gpt",
+    "claude",
+    "local models",
+    "jupyter"
+  ],
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Di-Gi/promptly.git"
+  },
+  "homepage": "https://github.com/Di-Gi/Promptly/blob/main/README.md",
+  "bugs": {
+    "url": "https://github.com/Di-Gi/Promptly/issues"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onNotebook:jupyter-notebook"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "promptly.startChat",
+        "title": "promptly: Start Chat"
+      },
+      {
+        "command": "promptly.extractCode",
+        "title": "promptly: Extract Code from Last Response"
+      },
+      {
+        "command": "promptly.enterPromptMode",
+        "title": "promptly: Enter Prompt Mode"
+      },
+      {
+        "command": "promptly.switchModel",
+        "title": "promptly: Switch Model"
+      },
+      {
+        "command": "promptly.handleTracebackError",
+        "title": "promptly: Handle Traceback Error"
+      },
+      {
+        "command": "promptly.setupLocalModel",
+        "title": "promptly: Setup Local Model"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "promptly.startChat",
+        "key": "ctrl+shift+z",
+        "mac": "cmd+shift+z",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "promptly.startChat",
+        "key": "ctrl+alt+z",
+        "mac": "cmd+alt+z",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "promptly.extractCode",
+        "key": "ctrl+shift+q",
+        "mac": "cmd+shift+q",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "promptly.extractCode",
+        "key": "ctrl+alt+q",
+        "mac": "cmd+alt+q",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "promptly.enterPromptMode",
+        "key": "shift+.",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "promptly",
+      "properties": {
+        "promptly.geminiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API Key for Gemini AI"
+        },
+        "promptly.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API Key for OpenAI"
+        },
+        "promptly.anthropicApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API Key for Anthropic"
+        },
+        "promptly.model": {
+          "type": "string",
+          "default": "gemini-1.5-flash",
+          "enum": [
+            "gemini-1.5-flash",
+            "gemini-1.5-pro-exp-0801",
+            "gemini-1.5-pro",
+            "gpt-3.5-turbo",
+            "gpt-4",
+            "claude-2",
+            "claude-instant-1",
+            "Setup Local Model"
+          ],
+          "description": "The AI model to use for generating responses"
+        },
+        "promptly.localModelPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the locally installed model"
+        },
+        "promptly.localPreconfiguredModel": {
+          "type": "string",
+          "enum": [
+            "Llama 3",
+            "Mistral"
+          ],
+          "default": "Llama 3",
+          "description": "The local pre-configured model to use"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.7",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.92.0",
+    "@typescript-eslint/eslint-plugin": "^7.14.1",
+    "@typescript-eslint/parser": "^7.11.0",
+    "@vscode/test-cli": "^0.0.9",
+    "@vscode/test-electron": "^2.4.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}
