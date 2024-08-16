@@ -1,17 +1,27 @@
 # Promptly: Intelligent Coding Assistant ![icon3](https://github.com/user-attachments/assets/838b719b-b863-4310-8a5f-be140960d230)
 
 
-
 Promptly is a powerful Visual Studio Code extension that integrates advanced AI capabilities into your coding workflow. It supports multiple AI models including Gemini AI, OpenAI's GPT, Anthropic's Claude, and local language models, providing intelligent assistance for various programming tasks.
 
 ## Features
 
+### AI-Powered Coding Assistance
 - **AI-Powered Chat**: Engage in context-aware conversations about your code.
 - **Code Generation**: Generate code snippets based on natural language descriptions.
-- **Error Handling**: Get assistance with error messages and debugging.
+- **Prompt Mode**: Quickly enter prompts with a dedicated marker for efficient interactions.
+- **Command Mode**: Execute specific commands like checking server status or shutting down local models.
+
+### Multi-Model and Local Support
 - **Multi-Model Support**: Choose between Gemini, GPT, Claude, or use local models like Llama 3 and Mistral.
-- **Jupyter Notebook Integration**: Seamless AI assistance within Jupyter notebooks.
+- **Local Model Support**: Set up and use local language models for offline capabilities.
+
+### Jupyter Notebook Integration
+- **Seamless Assistance**: AI-powered features are fully integrated within Jupyter notebooks.
+- **Automatic Error Detection**: Promptly can automatically detect and offer assistance for traceback errors.
+
+### Customization and User Experience
 - **Customizable Keybindings**: Quick access to AI features with customizable shortcuts.
+- **Language-Specific Comments**: Automatically uses the correct comment syntax for different programming languages.
 
 ## Installation
 
@@ -42,6 +52,7 @@ Promptly is a powerful Visual Studio Code extension that integrates advanced AI 
 ### Local Model Setup
 1. Run the command "Promptly: Setup Local Model" from the Command Palette
 2. Follow the prompts to select and configure your local model (Llama 3 or Mistral)
+3. Ensure you have the necessary dependencies installed for local model support
 
 ## Usage
 
@@ -49,7 +60,15 @@ Promptly is a powerful Visual Studio Code extension that integrates advanced AI 
 - Extract code from AI response: Use Ctrl+Shift+Q (Cmd+Shift+Q on Mac) or run "Promptly: Extract Code from Last Response"
 - Enter prompt mode: Use Shift+. or run "Promptly: Enter Prompt Mode"
 - Switch AI model: Run "Promptly: Switch Model" from the Command Palette
-- Handle errors in Jupyter notebooks: Run "Promptly: Handle Traceback Error" when an error occurs
+- Setup local model: Run "Promptly: Setup Local Model" from the Command Palette
+- Enter command mode: Use the "?" character to execute specific commands
+
+## Command Mode
+
+In command mode, you can execute specific actions:
+
+- status server: Check the status of the local model server
+- shutdown server: Safely shut down the local model server
 
 ## Configuration
 
@@ -70,7 +89,7 @@ Customize Promptly in your VS Code settings:
 
 ## Feedback and Support
 
-We welcome your feedback and bug reports! Please visit our [GitHub repository](https://github.com/Di-GI/promptly) to:
+We welcome your feedback and bug reports! Please visit our [GitHub repository](https://github.com/Di-Gi/promptly) to:
 
 - Report issues
 - Suggest new features
@@ -84,4 +103,4 @@ We welcome your feedback and bug reports! Please visit our [GitHub repository](h
 
 ## License
 
-This project is licensed under the Apache License 2.0. See the [LICENSE](https://github.com/Di-GI/promptly/blob/main/LICENSE) file for details.
+This project is licensed under the Apache License 2.0. See the [LICENSE](https://github.com/Di-Gi/promptly/blob/main/LICENSE) file for details.
