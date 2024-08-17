@@ -23,6 +23,14 @@ ________________
 - **Customizable Keybindings**: Quick access to AI features with customizable shortcuts.
 - **Language-Specific Comments**: Automatically uses the correct comment syntax for different programming languages.
 
+## Installation
+________________
+1. Open Visual Studio Code
+2. Go to the Extensions view (Ctrl+Shift+X)
+3. Search for "Promptly"
+4. Click Install
+
+
 ## Quick Start
 ________________
 1. After installation, open the Command Palette (Ctrl+Shift+P)
@@ -30,6 +38,8 @@ ________________
 3. If using an API-based model, set up your API key in the settings
 4. For local models, run "Promptly: Setup Local Model" and follow the prompts
 5. Start chatting with Ctrl+Shift+Z (Cmd+Shift+Z on Mac) or use the Command Palette
+
+
 
 ## Setup
 ________________
