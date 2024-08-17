@@ -1,4 +1,4 @@
-//localModelSetup.ts
+// localModelSetup.ts
 
 import * as vscode from 'vscode';
 import * as path from 'path';
@@ -16,6 +16,21 @@ function getOutputChannel(): vscode.OutputChannel {
         outputChannel = vscode.window.createOutputChannel('AI Chat Model Server');
     }
     return outputChannel;
+}
+
+interface CustomModelConfig {
+    id: string;
+    path: string;
+}
+
+function getRecentCustomModels(): CustomModelConfig[] {
+    return vscode.workspace.getConfiguration('promptly').get<CustomModelConfig[]>('recentCustomModels', []);
+}
+
+async function saveRecentCustomModel(modelId: string, modelPath: string) {
+    const recentModels = getRecentCustomModels();
+    const updatedModels = [{ id: modelId, path: modelPath }, ...recentModels.filter(m => m.id !== modelId)].slice(0, 5);
+    await vscode.workspace.getConfiguration('promptly').update('recentCustomModels', updatedModels, vscode.ConfigurationTarget.Global);
 }
 
 export async function getServerStats(): Promise<{ cpu_percent: number, memory_percent: number, queue_size: number } | null> {
@@ -121,23 +136,33 @@ export async function startLocalModelSetup() {
         return;
     }
 
-    let modelId: string;
+    let modelConfig: CustomModelConfig;
     if (modelChoice === 'custom') {
-        const customModelId = await getCustomModelId();
-        if (!customModelId) {
+        const customConfig = await getCustomModelId();
+        if (!customConfig) {
             console.log('Custom model input cancelled');
             vscode.window.showErrorMessage('Custom model input cancelled.');
             return;
         }
-        modelId = customModelId;
+        modelConfig = customConfig;
+        await saveRecentCustomModel(modelConfig.id, modelConfig.path);
+    } else if (modelChoice.startsWith('recent:')) {
+        const recentModelId = modelChoice.split(':')[1];
+        const recentModel = getRecentCustomModels().find(m => m.id === recentModelId);
+        if (!recentModel) {
+            console.log('Recent model not found');
+            vscode.window.showErrorMessage('Selected recent model not found.');
+            return;
+        }
+        modelConfig = recentModel;
     } else {
-        modelId = modelChoice;
+        modelConfig = { id: modelChoice, path: vscode.workspace.rootPath || '' };
     }
 
     const steps = [
         { title: 'Setup Python Environment', execute: setupPythonEnvironment },
-        { title: 'Configure Model', execute: () => configureModel(modelId) },
-        { title: 'Start Model Server', execute: () => startModelServer(modelId) }
+        { title: 'Configure Model', execute: () => configureModel(modelConfig.id, modelConfig.path) },
+        { title: 'Start Model Server', execute: () => startModelServer(modelConfig.id) }
     ];
 
     for (const step of steps) {
@@ -154,24 +179,38 @@ export async function startLocalModelSetup() {
     vscode.window.showInformationMessage('Local model setup complete!');
 }
 
-async function getCustomModelId(): Promise<string | undefined> {
+
+
+async function getCustomModelId(): Promise<CustomModelConfig | undefined> {
     const modelId = await vscode.window.showInputBox({
         prompt: 'Enter the HuggingFace model ID (e.g., "gpt2", "EleutherAI/gpt-neo-1.3B")',
         placeHolder: 'HuggingFace model ID',
-        validateInput: (input) => {
-            return input.trim() !== '' ? null : 'Please enter a valid model ID';
-        }
+        validateInput: (input) => input.trim() !== '' ? null : 'Please enter a valid model ID'
     });
 
-    return modelId ? modelId.trim() : undefined;
+    if (!modelId) return undefined;
+
+    const modelPath = await vscode.window.showInputBox({
+        prompt: `Enter the path where ${modelId} should be installed`,
+        value: vscode.workspace.rootPath
+    });
+
+    return modelPath ? { id: modelId.trim(), path: modelPath.trim() } : undefined;
 }
 
 async function selectModelOption(): Promise<string | undefined> {
     console.log('Entering selectModelOption function');
+    const recentCustomModels = getRecentCustomModels();
+    
     const options = [
         { label: 'Llama 3', description: 'Latest version of Llama', id: 'meta-llama/Meta-Llama-3.1-8B-Instruct' },
         { label: 'Mixtral', description: 'Mixture of Experts model', id: 'mistralai/Mixtral-8x7B-Instruct-v0.1' },
         { label: 'Custom HuggingFace Model', description: 'Specify your own model', id: 'custom' },
+        ...recentCustomModels.map(model => ({
+            label: `Recent: ${model.id}`,
+            description: `Path: ${model.path}`,
+            id: `recent:${model.id}`
+        }))
     ];
 
     const selected = await vscode.window.showQuickPick(options, {
@@ -181,7 +220,6 @@ async function selectModelOption(): Promise<string | undefined> {
     console.log('Selected option:', selected?.label);
     return selected?.id;
 }
-
 async function setupPythonEnvironment(): Promise<boolean> {
     const pythonExtension = vscode.extensions.getExtension('ms-python.python');
     if (!pythonExtension) {
@@ -236,24 +274,14 @@ async function setupPythonEnvironment(): Promise<boolean> {
     });
 }
 
-async function configureModel(model: string): Promise<boolean> {
+async function configureModel(model: string, modelPath: string): Promise<boolean> {
     console.log('Entering configureModel function with model:', model);
-    const modelPath = await vscode.window.showInputBox({
-        prompt: `Enter the path where ${model} should be installed`,
-        value: vscode.workspace.rootPath
-    });
-
-    if (!modelPath) {
-        console.log('Model path input cancelled');
-        return false;
-    }
-
     console.log('Configuring model with path:', modelPath);
-    await vscode.workspace.getConfiguration('aiChat').update('localModelPath', modelPath, vscode.ConfigurationTarget.Global);
-    await vscode.workspace.getConfiguration('aiChat').update('localPreconfiguredModel', model, vscode.ConfigurationTarget.Global);
-
+    await vscode.workspace.getConfiguration('promptly').update('localModelPath', modelPath, vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration('promptly').update('localPreconfiguredModel', model, vscode.ConfigurationTarget.Global);
     return true;
 }
+
 
 async function startModelServer(modelName: string): Promise<boolean> {
     console.log('Entering startModelServer function');
@@ -527,7 +555,7 @@ if __name__ == "__main__":
             setTimeout(async () => {
                 try {
                     const fetch = await getFetch();
-                    const response = await fetch('http://localhost:8000/docs');
+                    const response = await fetch('http://localhost:8000/');
                     if (response.ok) {
                         console.log('Model server is running');
                         vscode.window.showInformationMessage('Model server is running.');
@@ -597,8 +625,4 @@ async function getPythonPath(): Promise<string> {
             resolve(stdout.trim());
         });
     });
-}
-
-function runPythonScript(script: string, pythonPath: string) {
-    return exec(`${pythonPath} -c "${script.replace(/"/g, '\\"')}"`);
 }
