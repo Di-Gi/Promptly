@@ -1,4 +1,4 @@
-//extension.ts
+// extension.ts
 import * as vscode from 'vscode';
 import { window, commands, workspace, ExtensionContext, Range, TextEditor, Position, ConfigurationTarget, NotebookEditor, NotebookCell, NotebookCellKind, WorkspaceEdit, NotebookRange, NotebookEdit } from 'vscode';
 import { startLocalModelSetup, getServerStats, shutdownServer } from './localModelSetup';
@@ -50,30 +50,49 @@ const commentChars: { [key: string]: string } = {
 function getAvailableModels(): string[] {
     const extensionId = 'digi.promptly';
     const extension = vscode.extensions.getExtension(extensionId);
+    let models: string[] = [];
 
     if (extension) {
         const packageJSON = extension.packageJSON;
         const modelEnum = packageJSON.contributes?.configuration?.properties?.['promptly.model']?.enum;
 
         if (Array.isArray(modelEnum)) {
-            console.log('Available models from package.json:', modelEnum);
-            return modelEnum;
+            models = modelEnum.filter(model => model !== 'Setup Local Model');
         }
     }
 
-    console.warn('Unable to retrieve model list from package.json. Using fallback list.');
-    const fallbackList = [
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gpt-3.5-turbo",
-        "gpt-4",
-        "claude-2",
-        "claude-instant-1",
-        "Setup Local Model"
-    ];
-    console.log('Fallback model list:', fallbackList);
-    return fallbackList;
+    if (models.length === 0) {
+        console.warn('Unable to retrieve model list from package.json. Using fallback list.');
+        models = [
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gpt-3.5-turbo",
+            "gpt-4",
+            "claude-2",
+            "claude-instant-1"
+        ];
+    }
+
+    // Add available local models
+    const localModels = getLocalModels();
+    models = [...models, ...localModels];
+
+    console.log('Available models:', models);
+    return models;
 }
+
+function getLocalModels(): string[] {
+    const config = vscode.workspace.getConfiguration('promptly');
+    const localModelPath = config.get('localModelPath') as string;
+    const localPreconfiguredModel = config.get('localPreconfiguredModel') as string;
+
+    if (localModelPath && localPreconfiguredModel) {
+        return [`local:${localPreconfiguredModel}`];
+    }
+
+    return [];
+}
+
 
 export async function activate(context: ExtensionContext) {
     console.log('AI Chat extension activated');
@@ -154,52 +173,61 @@ export async function activate(context: ExtensionContext) {
 	let switchModelDisposable = commands.registerCommand('promptly.switchModel', async () => {
 		const config = workspace.getConfiguration('promptly');
 		const availableModels = getAvailableModels();
-	  
+	
 		console.log('All available models:', availableModels);
-	  
-		const selectedModel = await window.showQuickPick(availableModels, {
-		  placeHolder: 'Select a model',
+	
+		const setupLocalModelOption = 'Setup Local Model';
+		const modelOptions = availableModels.filter(model => model !== setupLocalModelOption);
+		modelOptions.push(setupLocalModelOption);
+	
+		const selectedModel = await window.showQuickPick(modelOptions, {
+			placeHolder: 'Select a model',
 		});
-	  
+	
 		if (selectedModel) {
-		  if (selectedModel === 'Setup Local Model') {
-			// Start the local model setup instead of switching to it
-			await commands.executeCommand('promptly.setupLocalModel');
-		  } else {
-			await config.update('model', selectedModel, ConfigurationTarget.Global);
-			window.showInformationMessage(`Switched to model: ${selectedModel}.`);
-			console.log('Model updated to:', selectedModel);
-	  
-			let apiKeyConfig: string;
-			if (selectedModel.startsWith('gemini-')) {
-			  apiKeyConfig = 'geminiApiKey';
-			} else if (selectedModel.startsWith('gpt-')) {
-			  apiKeyConfig = 'openaiApiKey';
-			} else if (selectedModel.startsWith('claude-')) {
-			  apiKeyConfig = 'anthropicApiKey';
+			if (selectedModel === setupLocalModelOption) {
+				// Start the local model setup instead of switching to it
+				await commands.executeCommand('promptly.setupLocalModel');
 			} else {
-			  throw new Error(`Unsupported model: ${selectedModel}`);
-			}
-	  
-			if (!config.get(apiKeyConfig)) {
-			  const setApiKey = await window.showInformationMessage(
-				`API key for ${selectedModel} is not set. Do you want to set it now?`,
-				'Yes', 'No'
-			  );
-			  if (setApiKey === 'Yes') {
-				const apiKey = await window.showInputBox({
-				  prompt: `Enter your API key for ${selectedModel}`,
-				  password: true
-				});
-				if (apiKey) {
-				  await config.update(apiKeyConfig, apiKey, ConfigurationTarget.Global);
-				  window.showInformationMessage('API key has been set.');
+				await config.update('model', selectedModel, ConfigurationTarget.Global);
+				window.showInformationMessage(`Switched to model: ${selectedModel}.`);
+				console.log('Model updated to:', selectedModel);
+	
+				if (selectedModel.startsWith('local:')) {
+					// No need to set API key for local models
+					return;
 				}
-			  }
+	
+				let apiKeyConfig: string;
+				if (selectedModel.startsWith('gemini-')) {
+					apiKeyConfig = 'geminiApiKey';
+				} else if (selectedModel.startsWith('gpt-')) {
+					apiKeyConfig = 'openaiApiKey';
+				} else if (selectedModel.startsWith('claude-')) {
+					apiKeyConfig = 'anthropicApiKey';
+				} else {
+					throw new Error(`Unsupported model: ${selectedModel}`);
+				}
+	
+				if (!config.get(apiKeyConfig)) {
+					const setApiKey = await window.showInformationMessage(
+						`API key for ${selectedModel} is not set. Do you want to set it now?`,
+						'Yes', 'No'
+					);
+					if (setApiKey === 'Yes') {
+						const apiKey = await window.showInputBox({
+							prompt: `Enter your API key for ${selectedModel}`,
+							password: true
+						});
+						if (apiKey) {
+							await config.update(apiKeyConfig, apiKey, ConfigurationTarget.Global);
+							window.showInformationMessage('API key has been set.');
+						}
+					}
+				}
 			}
-		  }
 		}
-	  });
+	});
 
     context.subscriptions.push(
         startChatDisposable,
@@ -218,11 +246,7 @@ export async function activate(context: ExtensionContext) {
 
 async function updateModelList() {
     const config = workspace.getConfiguration('promptly');
-    const modelConfig = config.inspect('model');
-    const availableModels = modelConfig?.defaultValue as string[] || [];
-
-    const localModels = await checkAvailableLocalModels();
-    const allModels = [...availableModels, ...localModels];
+    const allModels = getAvailableModels();
 
     const currentModel = config.get('model') as string;
     if (!allModels.includes(currentModel)) {
@@ -232,25 +256,6 @@ async function updateModelList() {
     }
 }
 
-async function checkAvailableLocalModels(): Promise<string[]> {
-    const localModelPath = vscode.workspace.getConfiguration().get('promptly.localModelPath') as string;
-    if (!localModelPath) {
-        return [];
-    }
-
-    try {
-        const response = await fetch('http://localhost:8000/');
-        if (response.ok) {
-            const localPreconfiguredModel = vscode.workspace.getConfiguration().get('promptly.localPreconfiguredModel') as string;
-            return [`local:${localPreconfiguredModel}`];
-        }
-    } catch (error) {
-        console.error('Error checking local model server:', error);
-        // Don't throw an error, just return an empty array
-    }
-
-    return [];
-}
 
   function doesPromptMarkerExist(editor: vscode.TextEditor): boolean {
 	const document = editor.document;
@@ -267,21 +272,18 @@ async function checkAvailableLocalModels(): Promise<string[]> {
   function highlightPromptMarker(editor: vscode.TextEditor) {
 	const document = editor.document;
 	const fileType = editor.document.languageId;
-	console.log(`Debug: highlightPromptMarker called for fileType = ${fileType}`);
   
 	// For Python files, only look for the prompt marker at the beginning of lines
 	if (fileType === 'python') {
 	  for (let i = 0; i < document.lineCount; i++) {
 		const line = document.lineAt(i);
 		const lineText = line.text.trimStart();
-		console.log(`Debug: Python - Line ${i}: ${lineText}`);
 		
 		if (lineText.startsWith(PROMPT_MARKER)) {
 		  const startPos = new vscode.Position(i, line.firstNonWhitespaceCharacterIndex);
 		  const endPos = new vscode.Position(i, line.firstNonWhitespaceCharacterIndex + PROMPT_MARKER.length);
 		  const range = new vscode.Range(startPos, endPos);
 		  editor.setDecorations(promptDecoration, [range]);
-		  console.log(`Debug: Prompt marker highlighted in Python file at line ${i}`);
 		  return;
 		}
 	  }
@@ -291,8 +293,6 @@ async function checkAvailableLocalModels(): Promise<string[]> {
 		const line = document.lineAt(i);
 		const lineText = line.text;
 		const markerIndex = lineText.lastIndexOf(PROMPT_MARKER);
-		console.log(`Debug: Line ${i}: ${lineText}`);
-		console.log(`Debug: Marker index: ${markerIndex}`);
   
 		if (markerIndex !== -1 && !lineText.trim().endsWith('-->')) {
 		  const range = new vscode.Range(
@@ -300,7 +300,6 @@ async function checkAvailableLocalModels(): Promise<string[]> {
 			new vscode.Position(i, markerIndex + PROMPT_MARKER.length)
 		  );
 		  editor.setDecorations(promptDecoration, [range]);
-		  console.log(`Debug: Prompt marker highlighted at line ${i}`);
 		  return;
 		}
 	  }
@@ -309,7 +308,6 @@ async function checkAvailableLocalModels(): Promise<string[]> {
 	// If we reach here, the marker was not found
 	isPromptMode = false;
 	editor.setDecorations(promptDecoration, []);
-	console.log('Debug: Prompt marker not found');
   }
 
   async function handleTextDocumentChange(event: vscode.TextDocumentChangeEvent) {
@@ -369,49 +367,38 @@ async function checkAvailableLocalModels(): Promise<string[]> {
 
 	  if (fileType === 'python') {
 	  const trimmedLineText = lineText.trimStart();
-	  console.log(`Debug: Trimmed line text: ${trimmedLineText}`);
 	  if (trimmedLineText.startsWith(PROMPT_MARKER)) {
 		const promptText = trimmedLineText.substring(PROMPT_MARKER.length).trim();
-		console.log(`Debug: Python prompt text: ${promptText}`);
 		if (promptText) {
-		  console.log('Debug: Calling handleChat');
 		  await handleChat(promptText);
 		  // Clear the prompt line after sending
 		  await editor.edit(editBuilder => {
 			editBuilder.delete(line.range);
 		  });
-		  console.log('Debug: Python prompt line cleared after sending');
 		}
 		isPromptMode = false;
 		editor.setDecorations(promptDecoration, []);
-		console.log('Debug: Exited prompt mode for Python');
 		return null; // Prevent default Enter behavior
 	  }
 	} else {
 	  // Existing logic for other file types
 	  const markerIndex = lineText.lastIndexOf(PROMPT_MARKER);
-	  console.log(`Debug: Marker index: ${markerIndex}`);
   
 	  if (markerIndex !== -1 && !lineText.trim().endsWith('-->')) {
 		const promptText = lineText.substring(markerIndex + 1).trim();
-		console.log(`Debug: Prompt text: ${promptText}`);
 		if (promptText) {
-		  console.log('Debug: Calling handleChat');
 		  await handleChat(promptText);
 		  // Clear the prompt line after sending
 		  await editor.edit(editBuilder => {
 			editBuilder.delete(line.range);
 		  });
-		  console.log('Debug: Prompt line cleared after sending');
 		}
 		isPromptMode = false;
 		editor.setDecorations(promptDecoration, []);
-		console.log('Debug: Exited prompt mode');
 		return null; // Prevent default Enter behavior
 	  }
 	}
   
-	console.log('Debug: handlePromptEnter did not handle the Enter key');
 	return vscode.commands.executeCommand('default:type', { text: '\n' });
   }
 
@@ -572,33 +559,27 @@ interface ResponsePart {
   }
 
   function detectTracebackError(cell: vscode.NotebookCell): string | null {
-	console.log(`Detecting traceback error in cell ${cell.index}`);
 	
 	if (cell.kind !== vscode.NotebookCellKind.Code || cell.outputs.length === 0) {
-	  console.log('Cell is not a code cell or has no outputs');
 	  return null;
 	}
   
 	for (const output of cell.outputs) {
 	  for (const item of output.items) {
-		console.log(`Output item mime type: ${item.mime}`);
+
 		
 		if (item.mime === 'application/vnd.code.notebook.error') {
 		  const errorData = JSON.parse(Buffer.from(item.data).toString('utf8'));
-		  console.log('Error data:', errorData);
 		  const tracebackText = `${errorData.name}: ${errorData.message}\n${errorData.stack}`;
-		  console.log('Error detected in output:', tracebackText);
 		  return tracebackText;
 		} else if (item.mime === 'application/vnd.code.notebook.stdout' ||
 				   item.mime === 'application/vnd.code.notebook.stderr' ||
 				   item.mime === 'text/plain') {
 		  const outputText = Buffer.from(item.data).toString('utf8');
-		  console.log('Output text:', outputText);
 		  if (outputText.includes('Traceback') || 
 			  outputText.includes('Error:') ||
 			  outputText.includes('Exception') ||
 			  outputText.toLowerCase().includes('error')) {
-			console.log('Error detected in output:', outputText);
 			return outputText;
 		  }
 		}
@@ -610,7 +591,6 @@ interface ResponsePart {
   }
 
   async function handleNotebookDocumentChange(e: vscode.NotebookDocumentChangeEvent) {
-	console.log('Notebook document changed');
   
 	// Check if the change involves cell execution
 	const hasExecutionChanges = e.cellChanges.some(change => 
@@ -618,16 +598,13 @@ interface ResponsePart {
 	);
   
 	if (hasExecutionChanges) {
-	  console.log('Cell execution detected');
 	  const notebook = e.notebook;
 	  const lastExecutedCell = findLastExecutedCell(notebook);
   
 	  if (lastExecutedCell) {
-		console.log('Last executed cell found:', lastExecutedCell.index);
 		const error = detectTracebackError(lastExecutedCell);
   
 		if (error) {
-		  console.log('Error detected:', error);
 		  // Directly handle the error without prompting the user
 		  await handleChatNotebook(notebook, lastExecutedCell, error);
 		} else {
@@ -811,7 +788,6 @@ interface ResponsePart {
 	edit.set(notebook.uri, [vscode.NotebookEdit.insertCells(range.start, [codeCell])]);
   
 	await vscode.workspace.applyEdit(edit);
-	console.log('Code block inserted into Jupyter Notebook.');
 	window.showInformationMessage(`Code block inserted. ${codeBlock.language ? `Language: ${codeBlock.language}` : 'No specific language detected.'}`);
   }
 

@@ -2,7 +2,7 @@
   "name": "promptly",
   "displayName": "Promptly",
   "description": "Integrates AI directly into your code with intelligent chat, seamless generation, and efficient error handling.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "DiGi",
   "engines": {
     "vscode": "^1.92.0"
@@ -127,6 +127,19 @@
             "Setup Local Model"
           ],
           "description": "The AI model to use for generating responses"
+        },
+        "promptly.recentCustomModels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "path": { "type": "string" }
+            },
+            "required": ["id", "path"]
+          },
+          "default": [],
+          "description": "List of recently used custom models"
         },
         "promptly.localModelPath": {
           "type": "string",
