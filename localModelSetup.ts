@@ -315,6 +315,10 @@ from starlette.responses import JSONResponse
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Suppress warnings
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 class ModelManager:
     def __init__(self):
         self.model = None
@@ -328,7 +332,7 @@ class ModelManager:
         logger.info(f"Starting model download and loading for: {model_name}")
         try:
             self.model = AutoModelForCausalLM.from_pretrained(model_name)
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name, clean_up_tokenization_spaces=False)
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
             self.model = self.model.to(self.device)
@@ -351,7 +355,7 @@ class ModelManager:
                 do_sample=True,
                 pad_token_id=self.tokenizer.pad_token_id,
             )
-            return [self.tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
+            return [self.tokenizer.decode(output, skip_special_tokens=True, clean_up_tokenization_spaces=False) for output in outputs]
         except Exception as e:
             logger.error(f"Generation error: {str(e)}")
             raise
@@ -486,115 +490,83 @@ if __name__ == "__main__":
        
                fs.writeFileSync(modelServerPath, modelServerCode);
 
-        return new Promise<boolean>((resolve) => {
-            let serverProcess: ReturnType<typeof spawn>;
-            try {
-                console.log('Spawning Python process with:', pythonPath, modelServerPath);
-                serverProcess = spawn(pythonPath, [modelServerPath]);
-            } catch (error) {
-                const errorMessage = `Failed to spawn Python process: ${error}`;
-                console.error(errorMessage);
-                outputChannel.appendLine(errorMessage);
-                vscode.window.showErrorMessage(errorMessage);
-                resolve(false);
-                return;
-            }
-
-            if (serverProcess.stdout) {
-                serverProcess.stdout.on('data', (data) => {
-                    const output = data.toString();
-                    console.log('Server stdout:', output);
-                    outputChannel.appendLine(output);
-                    if (output.includes('Starting server...')) {
-                        vscode.window.showInformationMessage('Model server is starting...');
-                    }
-                    if (output.includes('Model downloaded and loaded successfully')) {
-                        vscode.window.showInformationMessage('Model downloaded and loaded successfully.');
-                    }
-                });
-            } else {
-                console.warn('Server process stdout is null');
-                outputChannel.appendLine('Warning: Unable to capture server stdout');
-            }
-
-            if (serverProcess.stderr) {
-                serverProcess.stderr.on('data', (data) => {
-                    const error = data.toString();
-                    console.error('Server stderr:', error);
-                    outputChannel.appendLine(`ERROR: ${error}`);
-                    if (error.includes('Error:')) {
-                        vscode.window.showErrorMessage(`Model server error: ${error}`);
-                    }
-                });
-            } else {
-                console.warn('Server process stderr is null');
-                outputChannel.appendLine('Warning: Unable to capture server stderr');
-            }
-
-            serverProcess.on('error', (error) => {
-                const errorMessage = `Server process error: ${error.message}`;
-                console.error(errorMessage);
-                outputChannel.appendLine(errorMessage);
-                vscode.window.showErrorMessage(errorMessage);
-                resolve(false);
-            });
-
-            serverProcess.on('close', (code) => {
-                console.log('Server process closed with code:', code);
-                if (code !== 0) {
-                    const errorMessage = `Server process exited with code ${code}`;
-                    outputChannel.appendLine(errorMessage);
-                    vscode.window.showErrorMessage('Model server failed to start. Check the output channel for details.');
-                    resolve(false);
-                } else {
-                    outputChannel.appendLine('Server process closed successfully');
-                    resolve(true);
-                }
-            });
-
-            setTimeout(async () => {
+               return new Promise<boolean>((resolve) => {
+                let serverProcess: ReturnType<typeof spawn>;
                 try {
-                    const fetch = await getFetch();
-                    const response = await fetch('http://localhost:8000/');
-                    if (response.ok) {
-                        console.log('Model server is running');
-                        vscode.window.showInformationMessage('Model server is running.');
-                        resolve(true);
-                    } else {
-                        throw new Error(`Server responded with status: ${response.status}`);
-                    }
-                } catch (error: unknown) {
-                    if (error instanceof Error) {
-                        if (error.message.includes('ECONNREFUSED')) {
-                            console.error('Server is not running yet. Waiting longer...');
-                        } else {
-                            const errorMessage = `Error checking server status: ${error.message}`;
-                            console.error(errorMessage);
-                            outputChannel.appendLine(errorMessage);
-                            vscode.window.showWarningMessage('Model server may not have started properly. Check the output channel for details.');
-                            serverProcess.kill();
-                            resolve(false);
-                        }
-                    } else {
-                        console.error('An unknown error occurred');
-                        outputChannel.appendLine('An unknown error occurred');
-                        vscode.window.showWarningMessage('An unknown error occurred while checking the server status.');
-                        serverProcess.kill();
-                        resolve(false);
-                    }
+                    console.log('Spawning Python process with:', pythonPath, modelServerPath);
+                    serverProcess = spawn(pythonPath, [modelServerPath]);
+                } catch (error) {
+                    const errorMessage = `Failed to spawn Python process: ${error}`;
+                    console.error(errorMessage);
+                    outputChannel.appendLine(errorMessage);
+                    vscode.window.showErrorMessage(errorMessage);
+                    resolve(false);
+                    return;
                 }
-            }, 120000); // 2 minute timeout
-
-            vscode.window.showInformationMessage('Starting model server. This may take a few minutes...');
-        });
-    } catch (error) {
-        const errorMessage = `Error in startModelServer: ${error}`;
-        console.error(errorMessage);
-        outputChannel.appendLine(errorMessage);
-        vscode.window.showErrorMessage(errorMessage);
-        return false;
+    
+                if (serverProcess.stdout) {
+                    serverProcess.stdout.on('data', (data) => {
+                        const output = data.toString();
+                        console.log('Server stdout:', output);
+                        outputChannel.appendLine(output);
+                        if (output.includes('Starting server...')) {
+                            vscode.window.showInformationMessage('Model server is starting...');
+                        }
+                        if (output.includes('Model downloaded and loaded successfully')) {
+                            vscode.window.showInformationMessage('Model downloaded and loaded successfully.');
+                            resolve(true);
+                        }
+                    });
+                } else {
+                    console.warn('Server process stdout is null');
+                    outputChannel.appendLine('Warning: Unable to capture server stdout');
+                }
+    
+                if (serverProcess.stderr) {
+                    serverProcess.stderr.on('data', (data) => {
+                        const error = data.toString();
+                        console.error('Server stderr:', error);
+                        outputChannel.appendLine(`ERROR: ${error}`);
+                        if (error.includes('Error:')) {
+                            vscode.window.showErrorMessage(`Model server error: ${error}`);
+                        }
+                    });
+                } else {
+                    console.warn('Server process stderr is null');
+                    outputChannel.appendLine('Warning: Unable to capture server stderr');
+                }
+    
+                serverProcess.on('error', (error) => {
+                    const errorMessage = `Server process error: ${error.message}`;
+                    console.error(errorMessage);
+                    outputChannel.appendLine(errorMessage);
+                    vscode.window.showErrorMessage(errorMessage);
+                    resolve(false);
+                });
+    
+                serverProcess.on('close', (code) => {
+                    console.log('Server process closed with code:', code);
+                    if (code !== 0) {
+                        const errorMessage = `Server process exited with code ${code}`;
+                        outputChannel.appendLine(errorMessage);
+                        vscode.window.showErrorMessage('Model server failed to start. Check the output channel for details.');
+                        resolve(false);
+                    } else {
+                        outputChannel.appendLine('Server process closed successfully');
+                        resolve(true);
+                    }
+                });
+    
+                vscode.window.showInformationMessage('Starting model server. This may take a few minutes...');
+            });
+        } catch (error) {
+            const errorMessage = `Error in startModelServer: ${error}`;
+            console.error(errorMessage);
+            outputChannel.appendLine(errorMessage);
+            vscode.window.showErrorMessage(errorMessage);
+            return false;
+        }
     }
-}
 
 async function getPythonPath(): Promise<string> {
     try {
