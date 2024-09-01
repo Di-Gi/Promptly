@@ -77,14 +77,42 @@ In command mode, you can execute specific actions:
 
 ## Configuration
 ________________
-Customize Promptly in your VS Code settings:
+Promptly offers several configuration options to customize its behavior:
 
-- `Promptly.geminiApiKey`: Your Gemini AI API key
-- `Promptly.openaiApiKey`: Your OpenAI API key
-- `Promptly.anthropicApiKey`: Your Anthropic API key
-- `Promptly.model`: Choose between available AI models
-- `Promptly.localModelPath`: Path to your locally installed model
-- `Promptly.localPreconfiguredModel`: Select a pre-configured local model (Llama 3 or Mistral)
+### API Keys
+To use Promptly with different AI models, you need to configure the appropriate API keys:
+
+- `promptly.geminiApiKey`: API Key for Gemini AI
+- `promptly.openaiApiKey`: API Key for OpenAI
+- `promptly.anthropicApiKey`: API Key for Anthropic
+
+You can set these in your VS Code settings.
+
+### Custom Hotkeys
+Promptly supports user-defined keybindings for its main commands. You can easily configure these in your VS Code settings:
+
+- `promptly.hotkey.startChat`: Start an AI chat session
+- `promptly.hotkey.extractCode`: Extract code from the last AI response
+- `promptly.hotkey.enterPromptMode`: Enter prompt mode
+- `promptly.hotkey.switchModel`: Switch between AI models
+- `promptly.hotkey.handleTracebackError`: Handle traceback errors
+- `promptly.hotkey.setupLocalModel`: Setup a local AI model
+
+To set or change a hotkey:
+
+1. Open VS Code Settings (File > Preferences > Settings, or `Cmd+,` on Mac, `Ctrl+,` on Windows/Linux)
+2. Search for "promptly hotkey"
+3. Find the command you want to set a hotkey for
+4. Click on the edit icon (pencil) next to the input field
+5. Press the desired key combination
+6. The new hotkey will be automatically saved
+
+Example:
+To set `Ctrl+Shift+A` for starting a chat session, you would set:
+```json
+"promptly.hotkey.startChat": "ctrl+shift+a"
+```
+
 
 ## Troubleshooting
 ________________
