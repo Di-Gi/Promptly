@@ -2,7 +2,7 @@
   "name": "promptly",
   "displayName": "Promptly",
   "description": "Integrates AI directly into your code with intelligent chat, seamless generation, and efficient error handling.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "DiGi",
   "engines": {
     "vscode": "^1.92.0"
@@ -10,6 +10,7 @@
   "categories": [
     "Programming Languages",
     "Machine Learning",
+    "AI",
     "Snippets",
     "Other"
   ],
@@ -17,11 +18,18 @@
     "ai",
     "machine learning",
     "code generation",
+    "autocomplete",
+    "chatbot",
     "gemini",
     "gpt",
     "claude",
     "local models",
-    "jupyter"
+    "jupyter",
+    "error handling",
+    "code explanation",
+    "natural language processing",
+    "pair programming",
+    "coding assistant"
   ],
   "icon": "icon.png",
   "repository": {
@@ -64,37 +72,40 @@
         "title": "promptly: Setup Local Model"
       }
     ],
+
     "keybindings": [
       {
-        "command": "promptly.startChat",
-        "key": "ctrl+shift+z",
-        "mac": "cmd+shift+z",
+        "command": "promptly.startChat.keybinding",
+        "key": "${promptly.hotkey.startChat}",
         "when": "editorTextFocus"
       },
       {
-        "command": "promptly.startChat",
-        "key": "ctrl+alt+z",
-        "mac": "cmd+alt+z",
+        "command": "promptly.extractCode.keybinding",
+        "key": "${promptly.hotkey.extractCode}",
         "when": "editorTextFocus"
       },
       {
-        "command": "promptly.extractCode",
-        "key": "ctrl+shift+q",
-        "mac": "cmd+shift+q",
+        "command": "promptly.enterPromptMode.keybinding",
+        "key": "${promptly.hotkey.enterPromptMode}",
         "when": "editorTextFocus"
       },
       {
-        "command": "promptly.extractCode",
-        "key": "ctrl+alt+q",
-        "mac": "cmd+alt+q",
+        "command": "promptly.switchModel.keybinding",
+        "key": "${promptly.hotkey.switchModel}",
         "when": "editorTextFocus"
       },
       {
-        "command": "promptly.enterPromptMode",
-        "key": "shift+.",
+        "command": "promptly.handleTracebackError.keybinding",
+        "key": "${promptly.hotkey.handleTracebackError}",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "promptly.setupLocalModel.keybinding",
+        "key": "${promptly.hotkey.setupLocalModel}",
         "when": "editorTextFocus"
       }
     ],
+
     "configuration": {
       "title": "promptly",
       "properties": {
@@ -116,15 +127,22 @@
         "promptly.model": {
           "type": "string",
           "default": "gemini-1.5-flash",
-          "enum": [
-            "gemini-1.5-flash",
-            "gemini-1.5-pro-exp-0801",
-            "gemini-1.5-pro",
-            "gpt-3.5-turbo",
-            "gpt-4",
-            "claude-2",
-            "claude-instant-1",
-            "Setup Local Model"
+          "oneOf": [
+            {
+              "enum": [
+                "gemini-1.5-flash",
+                "gemini-1.5-pro-exp-0801",
+                "gemini-1.5-pro",
+                "gpt-3.5-turbo",
+                "gpt-4",
+                "claude-2",
+                "claude-instant-1",
+                "Setup Local Model"
+              ]
+            },
+            {
+              "pattern": "^local:.*$"
+            }
           ],
           "description": "The AI model to use for generating responses"
         },
@@ -148,12 +166,45 @@
         },
         "promptly.localPreconfiguredModel": {
           "type": "string",
-          "enum": [
-            "Llama 3",
-            "Mistral"
-          ],
           "default": "Llama 3",
-          "description": "The local pre-configured model to use"
+          "description": "The local pre-configured model to use."
+        },
+        "promptly.hotkeys": {
+          "type": "object",
+          "properties": {
+            "startChat": {
+              "type": "string",
+              "default": "",
+              "description": "Hotkey for starting a chat"
+            },
+            "extractCode": {
+              "type": "string",
+              "default": "",
+              "description": "Hotkey for extracting code from the last response"
+            },
+            "enterPromptMode": {
+              "type": "string",
+              "default": "",
+              "description": "Hotkey for entering prompt mode"
+            },
+            "switchModel": {
+              "type": "string",
+              "default": "",
+              "description": "Hotkey for switching the AI model"
+            },
+            "handleTracebackError": {
+              "type": "string",
+              "default": "",
+              "description": "Hotkey for handling traceback errors"
+            },
+            "setupLocalModel": {
+              "type": "string",
+              "default": "",
+              "description": "Hotkey for setting up a local model"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Custom hotkeys for Promptly commands"
         }
       }
     }
