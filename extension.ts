@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { window, commands, workspace, ExtensionContext, ConfigurationTarget } from 'vscode';
 import { startLocalModelSetup } from './localModelSetup';
 import {
@@ -15,7 +16,7 @@ const PROMPT_MARKER = '>>';
 let isPromptMode = false;
 let isCommandMode = false;
 
-
+let activePromptStatusBarItem: vscode.StatusBarItem;
 
 export async function activate(context: ExtensionContext) {
     try {
@@ -23,8 +24,21 @@ export async function activate(context: ExtensionContext) {
         registerCommands(context);
         startup();
 
+        activePromptStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+        activePromptStatusBarItem.command = 'promptly.selectActivePrompt';
+        context.subscriptions.push(activePromptStatusBarItem);
+
+        registerActivePromptCommand(context);
+
+        updateActivePromptMenu();
+
         context.subscriptions.push(
             workspace.onDidChangeConfiguration(event => {
+                if (event.affectsConfiguration('promptly.customPrompts') || 
+                    event.affectsConfiguration('promptly.activePrompt')) {
+                    updateActivePromptMenu();
+                }
+
                 if (event.affectsConfiguration('promptly.hotkeys')) {
                     vscode.window.showInformationMessage(
                         'Promptly: Hotkey configuration has changed. Please run the "Promptly: Update Keybindings" command to apply changes.',
@@ -42,11 +56,50 @@ export async function activate(context: ExtensionContext) {
     }
 }
 
+function registerActivePromptCommand(context: vscode.ExtensionContext) {
+    const command = vscode.commands.registerCommand('promptly.selectActivePrompt', async () => {
+        const config = vscode.workspace.getConfiguration('promptly');
+        const customPrompts = config.get('customPrompts') as { [key: string]: string };
+
+        const options = Object.keys(customPrompts).map(key => ({
+            label: key,
+            description: customPrompts[key].split('.')[0]
+        }));
+
+        const selected = await vscode.window.showQuickPick(options, {
+            placeHolder: 'Select active prompt'
+        });
+
+        if (selected) {
+            await config.update('activePrompt', selected.label, vscode.ConfigurationTarget.Global);
+            vscode.window.showInformationMessage(`Active prompt set to: ${selected.label}`);
+            updateActivePromptMenu();
+        }
+    });
+
+    context.subscriptions.push(command);
+}
+
+function updateActivePromptMenu() {
+    const config = vscode.workspace.getConfiguration('promptly');
+    const customPrompts = config.get('customPrompts') as { [key: string]: string };
+    const currentActivePrompt = config.get('activePrompt') as string;
+
+    // Update status bar item
+    if (activePromptStatusBarItem) {
+        activePromptStatusBarItem.text = `Prompt: ${currentActivePrompt}`;
+        activePromptStatusBarItem.show();
+    }
+
+    // Update the command palette
+    commands.executeCommand('setContext', 'promptly:customPrompts', Object.keys(customPrompts));
+}
+
 function registerCommands(context: ExtensionContext) {
     const commandHandlers = {
-        startChat: handleChat,
+        sendMessage: handleChat,
         extractCode: extractCodeFromLastResponse,
-        startChatNotebook: handleChatNotebook,
+        sendMessageNotebook: handleChatNotebook,
         setupLocalModel: startLocalModelSetup,
         handleTracebackError: handleTracebackError,
         enterCommandMode: () => enterMode('command'),
@@ -77,28 +130,49 @@ function registerCommands(context: ExtensionContext) {
     );
 }
 
+
 async function updateKeybindings() {
-    const config = workspace.getConfiguration('promptly');
+    const config = vscode.workspace.getConfiguration('promptly');
     const hotkeys = config.get('hotkeys') as { [key: string]: string };
 
     // Update VS Code settings
-    await config.update('hotkeys', hotkeys, ConfigurationTarget.Global);
+    await config.update('hotkeys', hotkeys, vscode.ConfigurationTarget.Global);
 
-    // Update keybindings.json
-    const keybindingsPath = path.join(process.env.APPDATA || '', 'Code', 'User', 'keybindings.json');
+    // Determine the path for keybindings.json based on VS Code version
+    const isInsiders = vscode.env.appName.includes('Insiders');
+    const vscodeUserPath = process.env.APPDATA ? 
+        path.join(process.env.APPDATA, isInsiders ? 'Code - Insiders' : 'Code', 'User') :
+        path.join(os.homedir(), '.config', isInsiders ? 'code-insiders' : 'code', 'User');
+    const keybindingsPath = path.join(vscodeUserPath, 'keybindings.json');
+
+    console.log(`Promptly: Using keybindings path: ${keybindingsPath}`);
+
     let keybindings: any[] = [];
 
-    if (fs.existsSync(keybindingsPath)) {
-        const keybindingsContent = fs.readFileSync(keybindingsPath, 'utf8');
-        try {
+    // Create the directory if it doesn't exist
+    try {
+        await fs.promises.mkdir(vscodeUserPath, { recursive: true });
+    } catch (error) {
+        console.error('Promptly: Error creating directory:', error);
+        vscode.window.showErrorMessage('Error creating directory for keybindings.json');
+        return;
+    }
+
+    // Read existing keybindings or create an empty file
+    try {
+        if (fs.existsSync(keybindingsPath)) {
+            const keybindingsContent = await fs.promises.readFile(keybindingsPath, 'utf8');
             // Remove comments before parsing
             const jsonContent = keybindingsContent.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
             keybindings = JSON.parse(jsonContent);
-        } catch (error) {
-            console.error('Promptly: Error parsing keybindings.json:', error);
-            vscode.window.showErrorMessage('Error updating keybindings. Please check your keybindings.json file.');
-            return;
+        } else {
+            // Create an empty keybindings.json file
+            await fs.promises.writeFile(keybindingsPath, '[]', 'utf8');
+            console.log('Promptly: Created new keybindings.json file');
         }
+    } catch (error) {
+        console.error('Promptly: Error reading/creating keybindings.json:', error);
+        vscode.window.showErrorMessage('Error reading or creating keybindings.json. Using an empty array.');
     }
 
     // Remove existing Promptly keybindings
@@ -117,7 +191,7 @@ async function updateKeybindings() {
 
     // Write updated keybindings back to file
     try {
-        fs.writeFileSync(keybindingsPath, JSON.stringify(keybindings, null, 2));
+        await fs.promises.writeFile(keybindingsPath, JSON.stringify(keybindings, null, 2), 'utf8');
         vscode.window.showInformationMessage('Promptly: Keybindings have been updated successfully.');
     } catch (error) {
         console.error('Promptly: Error writing keybindings.json:', error);
@@ -175,6 +249,7 @@ async function switchModel() {
         }
     }
 }
+
 
 async function promptForApiKey(model: string, config: vscode.WorkspaceConfiguration) {
     const apiKeyConfig = model.startsWith('gemini-') ? 'geminiApiKey' :

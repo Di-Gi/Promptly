@@ -5,6 +5,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { exec, spawn } from 'child_process';
 
+let localModelPort: number | null = null;
+
 async function getFetch() {
     return (await import('node-fetch')).default;
 }
@@ -35,8 +37,9 @@ async function saveRecentCustomModel(modelId: string, modelPath: string) {
 
 export async function getServerStats(): Promise<{ cpu_percent: number, memory_percent: number, queue_size: number } | null> {
     try {
+        const port = await getLocalModelPort();
         const fetch = await getFetch();
-        const response = await fetch('http://localhost:8000/server_stats');
+        const response = await fetch(`http://localhost:${port}/server_stats`);
         if (response.ok) {
             const stats = await response.json();
             
@@ -61,6 +64,19 @@ export async function getServerStats(): Promise<{ cpu_percent: number, memory_pe
     }
 }
 
+
+export async function getLocalModelPort(): Promise<number> {
+    if (localModelPort !== null) {
+        return localModelPort;
+    }
+
+    throw new Error('Local model port is not set. Make sure the model server is running.');
+}
+
+function setLocalModelPort(port: number) {
+    localModelPort = port;
+}
+
 // Type guard function
 function isValidServerStats(stats: any): stats is { cpu_percent: number, memory_percent: number, queue_size: number } {
     return (
@@ -75,6 +91,7 @@ function isValidServerStats(stats: any): stats is { cpu_percent: number, memory_
 export async function shutdownServer(): Promise<boolean> {
     let shutdownNotification: vscode.StatusBarItem | undefined;
     try {
+        const port = await getLocalModelPort();
         const fetch = await getFetch();
         
         // Create a status bar item for the shutdown process
@@ -82,7 +99,7 @@ export async function shutdownServer(): Promise<boolean> {
         shutdownNotification.text = "$(sync~spin) Shutting down server...";
         shutdownNotification.show();
 
-        const response = await fetch('http://localhost:8000/shutdown', { 
+        const response = await fetch('http://localhost:${port}/shutdown', { 
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
@@ -95,7 +112,7 @@ export async function shutdownServer(): Promise<boolean> {
             while (attempts < 30) {  // Wait for up to 30 seconds
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 try {
-                    await fetch('http://localhost:8000/');
+                    await fetch('http://localhost:${port}/');
                     attempts++;
                     // Update the status bar item
                     shutdownNotification.text = `$(sync~spin) Shutting down server... (${attempts}/30)`;
@@ -188,7 +205,7 @@ async function getCustomModelId(): Promise<CustomModelConfig | undefined> {
         validateInput: (input) => input.trim() !== '' ? null : 'Please enter a valid model ID'
     });
 
-    if (!modelId) return undefined;
+    if (!modelId) {return undefined;}
 
     const modelPath = await vscode.window.showInputBox({
         prompt: `Enter the path where ${modelId} should be installed`,
@@ -310,6 +327,7 @@ import signal
 from typing import List, Optional
 from contextlib import asynccontextmanager
 from starlette.responses import JSONResponse
+import socket
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -318,6 +336,15 @@ logger = logging.getLogger(__name__)
 # Suppress warnings
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
+
+def find_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        return s.getsockname()[1]
+
+PORT = find_free_port()
+logger.info(f"Selected port: {PORT}")
 
 class ModelManager:
     def __init__(self):
@@ -345,7 +372,7 @@ class ModelManager:
     async def generate(self, prompt: str, max_length: int, temperature: float, top_p: float, num_return_sequences: int):
         try:
             inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, padding=True).to(self.device)
-            max_new_tokens = max_length - inputs['input_ids'].shape[1]
+            max_new_tokens = min(max_length, 2048) - inputs['input_ids'].shape[1]  # Ensure we don't exceed model's max length
             outputs = self.model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
@@ -391,11 +418,11 @@ shutdown_event = asyncio.Event()
 
 class GenerationRequest(BaseModel):
     prompt: str
-    max_length: int = Field(default=100, ge=1, le=1000)
+    max_length: int = Field(default=100, ge=1, le=2048)  # Increased upper limit
     temperature: float = Field(default=1.0, ge=0.1, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
     num_return_sequences: int = Field(default=1, ge=1, le=5)
-
+    
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "Model server is running"}
@@ -460,7 +487,13 @@ async def shutdown():
 if __name__ == "__main__":
     import uvicorn
     
-    config = uvicorn.Config(app, host="0.0.0.0", port=8000, lifespan="on")
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=PORT,
+        lifespan="on",
+        timeout_keep_alive=300  # Set keep-alive timeout to 300 seconds (5 minutes)
+    )
     server = uvicorn.Server(config)
     
     async def run_server_with_graceful_shutdown():
@@ -471,6 +504,9 @@ if __name__ == "__main__":
         await server.shutdown()
         await server_task
         logger.info("Server shutdown complete")
+
+    # Print the port number to stdout
+    print(f"SERVER_PORT={PORT}", flush=True)
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -492,6 +528,8 @@ if __name__ == "__main__":
 
                return new Promise<boolean>((resolve) => {
                 let serverProcess: ReturnType<typeof spawn>;
+                let serverPort: number | null = null;
+    
                 try {
                     console.log('Spawning Python process with:', pythonPath, modelServerPath);
                     serverProcess = spawn(pythonPath, [modelServerPath]);
@@ -509,9 +547,15 @@ if __name__ == "__main__":
                         const output = data.toString();
                         console.log('Server stdout:', output);
                         outputChannel.appendLine(output);
-                        if (output.includes('Starting server...')) {
-                            vscode.window.showInformationMessage('Model server is starting...');
+                        
+                        const portMatch = output.match(/SERVER_PORT=(\d+)/);
+                        if (portMatch) {
+                            serverPort = parseInt(portMatch[1], 10);
+                            console.log(`Server port detected: ${serverPort}`);
+                            vscode.window.showInformationMessage(`Model server is starting on port ${serverPort}...`);
+                            setLocalModelPort(serverPort);
                         }
+                        
                         if (output.includes('Model downloaded and loaded successfully')) {
                             vscode.window.showInformationMessage('Model downloaded and loaded successfully.');
                             resolve(true);
