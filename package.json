@@ -2,7 +2,7 @@
   "name": "promptly",
   "displayName": "Promptly",
   "description": "Integrates AI directly into your code with intelligent chat, seamless generation, and efficient error handling.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "DiGi",
   "engines": {
     "vscode": "^1.92.0"
@@ -48,7 +48,7 @@
   "contributes": {
     "commands": [
       {
-        "command": "promptly.startChat",
+        "command": "promptly.sendMessage",
         "title": "promptly: Start Chat"
       },
       {
@@ -70,13 +70,18 @@
       {
         "command": "promptly.setupLocalModel",
         "title": "promptly: Setup Local Model"
+      },
+      {
+        "command": "promptly.selectActivePrompt",
+        "title": "Promptly: Select Active Prompt"
       }
+      
     ],
 
     "keybindings": [
       {
-        "command": "promptly.startChat.keybinding",
-        "key": "${promptly.hotkey.startChat}",
+        "command": "promptly.sendMessage.keybinding",
+        "key": "${promptly.hotkey.sendMessage}",
         "when": "editorTextFocus"
       },
       {
@@ -124,6 +129,9 @@
           "default": "",
           "description": "API Key for Anthropic"
         },
+
+
+
         "promptly.model": {
           "type": "string",
           "default": "gemini-1.5-flash",
@@ -135,8 +143,9 @@
                 "gemini-1.5-pro",
                 "gpt-3.5-turbo",
                 "gpt-4",
-                "claude-2",
-                "claude-instant-1",
+                "gpt-4-turbo",
+                "claude-3-5-sonnet-20240620",
+                "claude-3-haiku-20240307",
                 "Setup Local Model"
               ]
             },
@@ -146,6 +155,29 @@
           ],
           "description": "The AI model to use for generating responses"
         },
+
+
+
+        "promptly.customPrompts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {
+            "default": "You are a helpful AI assistant. Answer the user's questions to the best of your ability.",
+            "coder": "You are an expert programmer. Provide concise and efficient code solutions.",
+            "explainer": "You are a patient teacher. Explain concepts in simple terms with examples.",
+            "none": ""
+          },
+          "description": "Custom prompts for Promptly. Add, edit, or remove prompts as needed.",
+          "editPresentation": "multilineText"
+        },
+        "promptly.activePrompt": {
+          "type": "string",
+          "description": "Select the active custom prompt to use for all models",
+          "default": "default"
+        },
+
         "promptly.recentCustomModels": {
           "type": "array",
           "items": {
@@ -169,10 +201,13 @@
           "default": "Llama 3",
           "description": "The local pre-configured model to use."
         },
+
+
+        
         "promptly.hotkeys": {
           "type": "object",
           "properties": {
-            "startChat": {
+            "sendMessage": {
               "type": "string",
               "default": "",
               "description": "Hotkey for starting a chat"
@@ -209,6 +244,10 @@
       }
     }
   },
+
+
+
+
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",

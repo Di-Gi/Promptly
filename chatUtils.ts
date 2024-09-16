@@ -1,7 +1,7 @@
 // chatUtils.ts
 import * as vscode from 'vscode';
 import { window, workspace, Range, TextEditor, Position, ConfigurationTarget, NotebookEditor} from 'vscode';
-import { getServerStats, shutdownServer } from './localModelSetup';
+import { getServerStats, shutdownServer, getLocalModelPort } from './localModelSetup';
 
 const RESPONSE_START_MARKER = '\u200B⚡RESPONSE_START⚡\u200B';
 const RESPONSE_END_MARKER = '\u200B●RESPONSE_END●\u200B';
@@ -97,29 +97,46 @@ function getAvailableModels(): string[] {
     const extensionId = 'digi.promptly';
     const extension = vscode.extensions.getExtension(extensionId);
     let models: string[] = [];
-    if (extension) {
-        const packageJSON = extension.packageJSON;
-        const modelEnum = packageJSON.contributes?.configuration?.properties?.['promptly.model']?.enum;
-        if (Array.isArray(modelEnum)) {
-            models = modelEnum.filter(model => model !== 'Setup Local Model');
+
+    try {
+        if (extension) {
+            const packageJSON = extension.packageJSON;
+            const modelConfig = packageJSON.contributes?.configuration?.properties?.['promptly.model'];
+            
+            if (modelConfig?.oneOf && Array.isArray(modelConfig.oneOf)) {
+                // Define a type for the items in modelConfig.oneOf
+                type ModelConfigItem = {
+                    enum?: string[];
+                    pattern?: string;
+                };
+
+                const modelEnum = modelConfig.oneOf.find((item: ModelConfigItem) => Array.isArray(item.enum))?.enum;
+                if (Array.isArray(modelEnum)) {
+                    models = modelEnum.filter(model => model !== 'Setup Local Model');
+                }
+            }
         }
+    } catch (error) {
+        console.error('Error reading model list from package.json:', error);
     }
+
     if (models.length === 0) {
         console.warn('Unable to retrieve model list from package.json. Using fallback list.');
         models = [
             "gemini-1.5-flash",
+            "gemini-1.5-pro-exp-0801",
             "gemini-1.5-pro",
             "gpt-3.5-turbo",
-            "gpt-4-turbo",
-            "gpt-4o",
-            "gpt-4o-mini",
-            "claude-3-5-sonnet-20240620",
-            "claude-3-haiku-20240307"
+            "gpt-4",
+            "claude-2",
+            "claude-instant-1"
         ];
     }
+
     // Add available local models
     const localModels = getLocalModels();
     models = [...models, ...localModels];
+
     console.log('Available models:', models);
     return models;
 }
@@ -604,8 +621,9 @@ async function handleChat(promptOverride?: string) {
         storedCodeBlocks = [];
         lastResponseRange = null;
         animationControl = await startRequestAnimation(editor, insertPosition);
-        const timeoutPromise = new Promise<string>((_, reject) => {
-            setTimeout(() => reject(new Error('Request timed out')), 30000); // 30 seconds timeout
+        // Increase the timeout to 5 minutes (300000 ms)
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('Request timed out')), 300000);
         });
         const responsePromise = sendMessage(prompt);
         const response = await Promise.race([responsePromise, timeoutPromise]);
@@ -662,6 +680,7 @@ async function getPrompt(editor: TextEditor): Promise<string> {
     return prompt.trim();
 }
 
+
 function getCurrentModel(): string {
     const config = workspace.getConfiguration('promptly');
     const rawModel = config.get('model') as string;
@@ -678,66 +697,107 @@ function getCurrentModel(): string {
     return availableModels[0] || 'gemini-1.5-flash'; // First available model or a hardcoded default
 }
 
+export function getActivePrompt(): string {
+    const config = vscode.workspace.getConfiguration('promptly');
+    const customPrompts = config.get('customPrompts') as { [key: string]: string };
+    const activePromptName = config.get('activePrompt') as string;
+    return customPrompts[activePromptName] || customPrompts['default'];
+}
+
 async function sendMessage(message: string): Promise<string> {
     const model = getCurrentModel();
     console.log('Model being used:', model);
     const config = workspace.getConfiguration('promptly');
+    
+    // Get the active prompt
+    const systemPrompt = getActivePrompt();
+
     let apiKeyConfig: string;
     if (model.startsWith('gemini-')) {
         apiKeyConfig = 'geminiApiKey';
-    }
-    else if (model.startsWith('gpt-')) {
+    } else if (model.startsWith('gpt-')) {
         apiKeyConfig = 'openaiApiKey';
-    }
-    else if (model.startsWith('claude-')) {
+    } else if (model.startsWith('claude-')) {
         apiKeyConfig = 'anthropicApiKey';
-    }
-    else if (model.startsWith('local:')) {
-        return sendLocalModelMessage(message);
-    }
-    else {
+    } else if (model.startsWith('local:')) {
+        return sendLocalModelMessage(message, systemPrompt);
+    } else {
         throw new Error(`Unsupported model: ${model}`);
     }
+
     const apiKey = config.get(apiKeyConfig) as string;
     if (!apiKey) {
         throw new Error(`${apiKeyConfig} not configured. Please set it in your settings.`);
     }
+
+    // Create a timeout promise
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Request timed out')), 300000); // 5 minutes timeout
+    });
+
+    let responsePromise: Promise<string>;
     switch (true) {
         case model.startsWith('gemini-'):
-            return sendGeminiMessage(message, model, apiKey);
+            responsePromise = sendGeminiMessage(message, model, apiKey, systemPrompt);
+            break;
         case model.startsWith('gpt-'):
-            return sendOpenAIMessage(message, model, apiKey);
+            responsePromise = sendOpenAIMessage(message, model, apiKey, systemPrompt);
+            break;
         case model.startsWith('claude-'):
-            return sendAnthropicMessage(message, model, apiKey);
+            responsePromise = sendAnthropicMessage(message, model, apiKey, systemPrompt);
+            break;
         default:
             throw new Error(`Unsupported model: ${model}`);
     }
+
+    // Race the response promise against the timeout
+    return Promise.race([responsePromise, timeoutPromise]);
 }
 
-async function sendLocalModelMessage(message: string): Promise<string> {
+
+
+
+async function sendLocalModelMessage(message: string, systemPrompt: string): Promise<string> {
     try {
-        const response = await fetch('http://localhost:8000/generate', {
+        const port = await getLocalModelPort();
+        const response = await fetch(`http://localhost:${port}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: message, max_length: 100 })
+            body: JSON.stringify({ 
+                prompt: `${systemPrompt}\n\nUser: ${message}\n\nAssistant:`,
+                max_length: 512
+            }),
+            // Increased the timeout to 5 minutes (300000 milliseconds)
+            signal: AbortSignal.timeout(300000)
         });
+
         if (!response.ok) {
+            if (response.status === 422) {
+                const errorData = await response.json();
+                throw new Error(`Invalid request: ${JSON.stringify(errorData)}`);
+            }
             throw new Error(`Local model API request failed with status ${response.status}`);
         }
+
         const data = await response.json() as LocalModelResponse;
         console.log('Local model response:', data);
+
         if (!data || !Array.isArray(data.generated_texts) || data.generated_texts.length === 0) {
             throw new Error('Invalid response format from local model');
         }
+
         return data.generated_texts[0];
-    }
-    catch (error) {
+    } catch (error) {
         console.error('Error sending message to local model:', error);
-        throw new Error('Failed to communicate with the local model. Make sure the model server is running.');
+        if (error instanceof Error) {
+            throw new Error(`Failed to communicate with the local model: ${error.message}`);
+        } else {
+            throw new Error('Failed to communicate with the local model. Make sure the model server is running.');
+        }
     }
 }
 
-async function sendOpenAIMessage(message: string, model: string, apiKey: string): Promise<string> {
+async function sendOpenAIMessage(message: string, model: string, apiKey: string, systemPrompt: string): Promise<string> {
     const url = 'https://api.openai.com/v1/chat/completions';
     const headers = {
         'Content-Type': 'application/json',
@@ -745,7 +805,10 @@ async function sendOpenAIMessage(message: string, model: string, apiKey: string)
     };
     const body = JSON.stringify({
         model: model,
-        messages: [{ role: 'user', content: message }],
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: message }
+        ],
     });
     const response = await fetch(url, {
         method: 'POST',
@@ -762,7 +825,7 @@ async function sendOpenAIMessage(message: string, model: string, apiKey: string)
     return data.choices[0].message.content;
 }
 
-async function sendAnthropicMessage(message: string, model: string, apiKey: string): Promise<string> {
+async function sendAnthropicMessage(message: string, model: string, apiKey: string, systemPrompt: string): Promise<string> {
     const url = 'https://api.anthropic.com/v1/messages';
     const headers = {
         'Content-Type': 'application/json',
@@ -772,7 +835,10 @@ async function sendAnthropicMessage(message: string, model: string, apiKey: stri
     const body = JSON.stringify({
         model: model,
         max_tokens: 1024,
-        messages: [{ role: "user", content: message }]
+        messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: message }
+        ]
     });
     try {
         const response = await fetch(url, {
@@ -799,12 +865,11 @@ async function sendAnthropicMessage(message: string, model: string, apiKey: stri
     }
 }
 
-async function sendGeminiMessage(message: string, model: string, apiKey: string): Promise<string> {
+async function sendGeminiMessage(message: string, model: string, apiKey: string, systemPrompt: string): Promise<string> {
     const maxRetries = 3;
     const retryDelay = 1000; // 1 second
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            // Construct the correct URL for Gemini API
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`;
             const headers = {
                 'Content-Type': 'application/json',
@@ -813,9 +878,8 @@ async function sendGeminiMessage(message: string, model: string, apiKey: string)
                 contents: [
                     {
                         parts: [
-                            {
-                                text: message
-                            }
+                            { text: systemPrompt },
+                            { text: message }
                         ]
                     }
                 ],
@@ -990,9 +1054,9 @@ function formatResponse(response: string | undefined): string {
     const lines = response.split('\n');
     // Remove any empty lines at the start and end
     while (lines.length > 0 && lines[0].trim() === '')
-        lines.shift();
+        {lines.shift();}
     while (lines.length > 0 && lines[lines.length - 1].trim() === '')
-        lines.pop();
+        {lines.pop();}
     // Join the lines back together
     return lines.join('\n');
 }
@@ -1289,4 +1353,4 @@ export {
     sendLocalModelMessage, sendOpenAIMessage, sendAnthropicMessage,
     sendGeminiMessage, appendResponseToFile, formatResponse,
     extractCodeFromLastResponse, showCodeBlockPicker, removeLastResponse,
-    insertCodeBlock, findInsertPosition, extractCodeAndLanguage}
+    insertCodeBlock, findInsertPosition, extractCodeAndLanguage};
