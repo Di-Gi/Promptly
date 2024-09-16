@@ -88,6 +88,23 @@ To use Promptly with different AI models, you need to configure the appropriate 
 
 You can set these in your VS Code settings.
 
+⸻⸻⸻⸻
+### Custom Prompts
+Promptly allows you to create and use custom prompts to tailor the AI's behavior:
+
+1. Open VS Code Settings (File > Preferences > Settings)
+2. Search for "promptly custom prompts"
+3. In the "Promptly: Custom Prompts" section, click "Add Item"
+4. Enter a name for your prompt in the "Item" field
+5. Enter your custom prompt text in the "Value" field; click OK when finished.
+
+To select an active prompt:
+1. Click the "Prompt: [current prompt]" item in the status bar (bottom-right)
+2. Choose your desired prompt from the list
+
+The selected prompt will be used for all AI interactions until changed.
+
+⸻⸻⸻⸻
 ### Custom Hotkeys
 Promptly supports user-defined keybindings for its main commands. You can easily configure these in your VS Code settings:
 
@@ -102,16 +119,17 @@ To set or change a hotkey:
 
 1. Open VS Code Settings (File > Preferences > Settings, or `Cmd+,` on Mac, `Ctrl+,` on Windows/Linux)
 2. Search for "promptly hotkey"
-3. Find the command you want to set a hotkey for
-4. Click on the edit icon (pencil) next to the input field
-5. Press the desired key combination
-6. The new hotkey will be automatically saved
+3. Find the Promptly: Hotkeys section
+4. Select the command you want to set a hotkey for by clicking add item
+5. Enter the desired key combination in the value field
+6. The new hotkey will be automatically saved (update when prompted)
 
 Example:
 To set `Ctrl+Shift+A` for starting a chat session, you would set:
 ```json
-"promptly.hotkey.startChat": "ctrl+shift+a"
+"startChat": "ctrl+shift+a"
 ```
+
 
 
 ## Troubleshooting
