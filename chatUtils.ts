@@ -939,111 +939,648 @@ async function sendGeminiMessage(message: string, model: string, apiKey: string,
     throw new Error("Unexpected error in sendGeminiMessage");
 }
 
-async function appendResponseToFile(editor: vscode.TextEditor, response: string, animationControl: AnimationControl, fileType: string) {
-    // Remove only the animation dots
-    await editor.edit(editBuilder => {
-        editBuilder.delete(animationControl.animationRange);
-    });
-    let currentPosition = animationControl.insertPosition;
-    // Create a decoration type for blue markers
-    const blueMarkerDecoration = vscode.window.createTextEditorDecorationType({
-        color: BLUE_COLOR
-    });
-    // Create a decoration type for white response text
-    const whiteTextDecoration = vscode.window.createTextEditorDecorationType({
-        color: WHITE_COLOR
-    });
-    // Get the comment character for the current file type
-    const commentChar = commentChars[fileType] || '//';
-    // Special handling for HTML, XML, and Markdown
-    const needsClosingTag = ['html', 'xml', 'markdown'].includes(fileType);
-    // Format the response
-    const formattedResponse = formatResponse(response);
-    if (needsClosingTag) {
-        // For HTML, XML, and Markdown: create a single comment block
-        await editor.edit(editBuilder => {
-            editBuilder.insert(currentPosition, `\n\n<!-- ${RESPONSE_START_MARKER}\n\n`);
-        });
-        currentPosition = new vscode.Position(currentPosition.line + 3, 0);
-        // Apply blue color to the start marker
-        const startMarkerRange = new vscode.Range(new vscode.Position(currentPosition.line - 1, 0), new vscode.Position(currentPosition.line - 1, 4 + RESPONSE_START_MARKER.length));
-        editor.setDecorations(blueMarkerDecoration, [startMarkerRange]);
-        // Typewriter effect for the response
-        const lines = formattedResponse.split('\n');
-        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-            const line = lines[lineIndex];
-            const chunkSize = 5;
-            for (let i = 0; i < line.length; i += chunkSize) {
-                const chunk = line.slice(i, Math.min(i + chunkSize, line.length));
-                await editor.edit(editBuilder => {
-                    editBuilder.insert(currentPosition, chunk);
-                });
-                currentPosition = new vscode.Position(currentPosition.line, currentPosition.character + chunk.length);
-                await new Promise(resolve => setTimeout(resolve, 10));
-            }
-            if (lineIndex < lines.length - 1) {
-                await editor.edit(editBuilder => {
-                    editBuilder.insert(currentPosition, '\n');
-                });
-                currentPosition = new vscode.Position(currentPosition.line + 1, 0);
-            }
-        }
-        // Add the end marker
-        await editor.edit(editBuilder => {
-            editBuilder.insert(currentPosition, `\n\n${RESPONSE_END_MARKER} -->\n\n`);
-        });
-        // Apply blue color to the end marker
-        const endMarkerRange = new vscode.Range(new vscode.Position(currentPosition.line + 2, 0), new vscode.Position(currentPosition.line + 2, RESPONSE_END_MARKER.length + 5));
-        editor.setDecorations(blueMarkerDecoration, [endMarkerRange]);
-        // Apply white color to the response text
-        const responseRange = new vscode.Range(new vscode.Position(startMarkerRange.end.line + 1, 0), new vscode.Position(endMarkerRange.start.line, 0));
-        editor.setDecorations(whiteTextDecoration, [responseRange]);
+
+// Message State Management
+interface MessageSegment {
+    id: string;
+    text: string;
+    lineNumber: number;
+    position: vscode.Position;
+    processed: boolean;
+    written: boolean;
+    writtenPosition?: vscode.Position;
+    retryCount: number;
+    checksum?: string;
+}
+
+interface EditorState {
+    isActive: boolean;
+    lastValidPosition?: vscode.Position;
+    contentComplete: boolean;
+    headerWritten: boolean;
+    headerPosition?: vscode.Position;
+    lastProcessedSegmentId?: string;
+    segmentOrder: string[];
+}
+
+interface PendingMessage {
+    id: string;
+    message: string;
+    segments: Map<string, MessageSegment>;
+    position: vscode.Position;
+    fileType: string;
+    isComplete: boolean;
+    retryCount: number;
+    editorState: EditorState;
+    editor: vscode.TextEditor;
+    decorations?: {
+        blueMarker: vscode.TextEditorDecorationType;
+        whiteText: vscode.TextEditorDecorationType;
+        startRange?: vscode.Range;
+        endRange?: vscode.Range;
+        contentRange?: vscode.Range;
+    };
+}
+
+class MessageStateManager {
+    private messages: Map<string, PendingMessage> = new Map();
+    private activeDocumentId?: string;
+
+    generateId(): string {
+        return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     }
-    else {
-        // For other file types: add comment characters to each line
-        await editor.edit(editBuilder => {
-            editBuilder.insert(currentPosition, `\n\n${commentChar} ${RESPONSE_START_MARKER}\n`);
-        });
-        currentPosition = new vscode.Position(currentPosition.line + 3, 0);
-        // Apply blue color to the start marker
-        const startMarkerRange = new vscode.Range(new vscode.Position(currentPosition.line - 1, 0), new vscode.Position(currentPosition.line - 1, commentChar.length + 1 + RESPONSE_START_MARKER.length));
-        editor.setDecorations(blueMarkerDecoration, [startMarkerRange]);
-        // Typewriter effect for the response
-        const lines = formattedResponse.split('\n');
-        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-            const line = lines[lineIndex];
-            const chunkSize = 5;
-            await editor.edit(editBuilder => {
-                editBuilder.insert(currentPosition, `${commentChar} `);
+
+    createChecksum(content: string): string {
+        return content.split('').reduce((acc, char) => 
+            (((acc << 5) - acc) + char.charCodeAt(0))|0, 0).toString(36);
+    }
+
+    segmentMessage(message: string, startPosition: vscode.Position): [Map<string, MessageSegment>, string[]] {
+        const segments = new Map<string, MessageSegment>();
+        const segmentOrder: string[] = [];
+        
+        message.split('\n').forEach((line, index) => {
+            const segmentId = this.generateId();
+            segments.set(segmentId, {
+                id: segmentId,
+                text: line,
+                lineNumber: startPosition.line + index + 3,
+                position: new vscode.Position(startPosition.line + index + 3, 0),
+                processed: false,
+                written: false,
+                retryCount: 0,
+                checksum: this.createChecksum(line)
             });
-            currentPosition = new vscode.Position(currentPosition.line, commentChar.length + 1);
-            for (let i = 0; i < line.length; i += chunkSize) {
-                const chunk = line.slice(i, Math.min(i + chunkSize, line.length));
-                await editor.edit(editBuilder => {
-                    editBuilder.insert(currentPosition, chunk);
-                });
-                currentPosition = new vscode.Position(currentPosition.line, currentPosition.character + chunk.length);
-                await new Promise(resolve => setTimeout(resolve, 10));
-            }
-            if (lineIndex < lines.length - 1) {
-                await editor.edit(editBuilder => {
-                    editBuilder.insert(currentPosition, '\n');
-                });
-                currentPosition = new vscode.Position(currentPosition.line + 1, 0);
+            segmentOrder.push(segmentId);
+        });
+
+        return [segments, segmentOrder];
+    }
+
+    async validateContent(
+        editor: vscode.TextEditor,
+        pendingMessage: PendingMessage
+    ): Promise<{ isValid: boolean; lastValidSegmentId?: string }> {
+        const document = editor.document;
+        let lastValidSegmentId: string | undefined;
+        const startLine = pendingMessage.editorState.headerPosition?.line || pendingMessage.position.line;
+
+        for (const segmentId of pendingMessage.editorState.segmentOrder) {
+            const segment = pendingMessage.segments.get(segmentId);
+            if (!segment?.written) {continue;}
+
+            try {
+                const lineContent = document.lineAt(startLine + segment.lineNumber).text;
+                const currentChecksum = this.createChecksum(lineContent.trim());
+                
+                if (currentChecksum === segment.checksum) {
+                    lastValidSegmentId = segmentId;
+                } else {
+                    break;
+                }
+            } catch (error) {
+                break;
             }
         }
-        // Add the end marker
-        await editor.edit(editBuilder => {
-            editBuilder.insert(currentPosition, `\n${commentChar} ${RESPONSE_END_MARKER}\n\n`);
-        });
-        // Apply blue color to the end marker
-        const endMarkerRange = new vscode.Range(new vscode.Position(currentPosition.line + 1, 0), new vscode.Position(currentPosition.line + 1, commentChar.length + 1 + RESPONSE_END_MARKER.length));
-        editor.setDecorations(blueMarkerDecoration, [endMarkerRange]);
-        // Apply white color to the response text
-        const responseRange = new vscode.Range(new vscode.Position(startMarkerRange.end.line + 1, 0), new vscode.Position(endMarkerRange.start.line, 0));
-        editor.setDecorations(whiteTextDecoration, [responseRange]);
+
+        return {
+            isValid: lastValidSegmentId === pendingMessage.editorState.segmentOrder[
+                pendingMessage.editorState.segmentOrder.length - 1
+            ],
+            lastValidSegmentId
+        };
+    }
+
+    async validateEditorState(
+        editor: vscode.TextEditor,
+        pendingMessage: PendingMessage
+    ): Promise<boolean> {
+        try {
+            if (!editor || !editor.document || editor.document.isClosed) {
+                return false;
+            }
+
+            const activeEditor = vscode.window.activeTextEditor;
+            if (!activeEditor || activeEditor.document.uri.toString() !== editor.document.uri.toString()) {
+                return false;
+            }
+
+            try {
+                await editor.edit(editBuilder => {
+                    editBuilder.insert(new vscode.Position(0, 0), '');
+                });
+                return true;
+            } catch {
+                return false;
+            }
+        } catch (error) {
+            console.error('Editor state validation failed:', error);
+            return false;
+        }
+    }
+
+    private async processSegment(
+        editor: vscode.TextEditor,
+        segment: MessageSegment,
+        currentPosition: vscode.Position,
+        needsClosingTag: boolean,
+        commentChar: string,
+        pendingMessage: PendingMessage
+    ): Promise<vscode.Position | null> {
+        if (!await this.validateEditorState(editor, pendingMessage)) {
+            return null;
+        }
+
+        const chunkSize = 5;
+        try {
+            let segmentPosition = currentPosition;
+
+            if (!needsClosingTag) {
+                await editor.edit(editBuilder => {
+                    editBuilder.insert(segmentPosition, `${commentChar} `);
+                });
+                segmentPosition = new vscode.Position(
+                    segmentPosition.line,
+                    commentChar.length + 1
+                );
+            }
+
+            const line = segment.text;
+            for (let i = 0; i < line.length; i += chunkSize) {
+                if (!await this.validateEditorState(editor, pendingMessage)) {
+                    return null;
+                }
+
+                const chunk = line.slice(i, Math.min(i + chunkSize, line.length));
+                await editor.edit(editBuilder => {
+                    editBuilder.insert(segmentPosition, chunk);
+                });
+                segmentPosition = new vscode.Position(
+                    segmentPosition.line,
+                    segmentPosition.character + chunk.length
+                );
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+
+            await editor.edit(editBuilder => {
+                editBuilder.insert(segmentPosition, '\n');
+            });
+
+            return new vscode.Position(segmentPosition.line + 1, 0);
+        } catch (error) {
+            console.error('Error processing segment:', error);
+            return null;
+        }
+    }
+
+    async appendHeader(
+        editor: vscode.TextEditor,
+        pendingMessage: PendingMessage,
+        needsClosingTag: boolean,
+        commentChar: string
+    ): Promise<void> {
+        pendingMessage.decorations = {
+            blueMarker: vscode.window.createTextEditorDecorationType({
+                color: BLUE_COLOR
+            }),
+            whiteText: vscode.window.createTextEditorDecorationType({
+                color: WHITE_COLOR
+            })
+        };
+
+        const headerStartPosition = new vscode.Position(pendingMessage.position.line, 0);
+        if (needsClosingTag) {
+            await editor.edit(editBuilder => {
+                editBuilder.insert(headerStartPosition, `\n\n<!-- ${RESPONSE_START_MARKER}\n\n`);
+            });
+            pendingMessage.decorations.startRange = new vscode.Range(
+                new vscode.Position(headerStartPosition.line + 2, 0),
+                new vscode.Position(headerStartPosition.line + 2, 4 + RESPONSE_START_MARKER.length)
+            );
+            pendingMessage.editorState.headerPosition = new vscode.Position(headerStartPosition.line + 4, 0);
+        } else {
+            await editor.edit(editBuilder => {
+                editBuilder.insert(headerStartPosition, `\n\n${commentChar} ${RESPONSE_START_MARKER}\n\n`);
+            });
+            pendingMessage.decorations.startRange = new vscode.Range(
+                new vscode.Position(headerStartPosition.line + 2, 0),
+                new vscode.Position(headerStartPosition.line + 2, commentChar.length + 1 + RESPONSE_START_MARKER.length)
+            );
+            pendingMessage.editorState.headerPosition = new vscode.Position(headerStartPosition.line + 4, 0);
+        }
+
+        editor.setDecorations(pendingMessage.decorations.blueMarker, [pendingMessage.decorations.startRange]);
+        pendingMessage.editorState.headerWritten = true;
+    }
+
+    async appendFooter(
+        editor: vscode.TextEditor,
+        pendingMessage: PendingMessage,
+        needsClosingTag: boolean,
+        commentChar: string
+    ): Promise<void> {
+        const lastSegmentId = pendingMessage.editorState.segmentOrder[pendingMessage.editorState.segmentOrder.length - 1];
+        const lastSegment = pendingMessage.segments.get(lastSegmentId)!;
+        const position = lastSegment.writtenPosition || pendingMessage.position;
+
+        try {
+            if (needsClosingTag) {
+                await editor.edit(editBuilder => {
+                    editBuilder.insert(position, `\n\n${RESPONSE_END_MARKER} -->\n\n`);
+                });
+                pendingMessage.decorations!.endRange = new vscode.Range(
+                    new vscode.Position(position.line + 1, 0),
+                    new vscode.Position(position.line + 1, RESPONSE_END_MARKER.length + 5)
+                );
+            } else {
+                await editor.edit(editBuilder => {
+                    editBuilder.insert(position, `\n${commentChar} ${RESPONSE_END_MARKER}\n\n`);
+                });
+                pendingMessage.decorations!.endRange = new vscode.Range(
+                    new vscode.Position(position.line + 1, 0),
+                    new vscode.Position(position.line + 1, commentChar.length + 1 + RESPONSE_END_MARKER.length)
+                );
+            }
+
+            this.updateDecorations(editor, pendingMessage);
+        } catch (error) {
+            console.error('Error in appendFooter:', error);
+        }
+    }
+
+    private updateDecorations(editor: vscode.TextEditor, pendingMessage: PendingMessage): void {
+        if (!pendingMessage.decorations?.startRange || !pendingMessage.decorations?.endRange) {return;}
+
+        pendingMessage.decorations.contentRange = new vscode.Range(
+            new vscode.Position(pendingMessage.decorations.startRange.end.line + 1, 0),
+            new vscode.Position(pendingMessage.decorations.endRange.start.line, 0)
+        );
+
+        editor.setDecorations(pendingMessage.decorations.whiteText, [pendingMessage.decorations.contentRange]);
+        editor.setDecorations(pendingMessage.decorations.blueMarker, [
+            pendingMessage.decorations.startRange,
+            pendingMessage.decorations.endRange
+        ]);
+    }
+
+    async renderContent(editor: vscode.TextEditor, pendingMessage: PendingMessage, response: string, needsClosingTag: boolean, commentChar: string): Promise<void> {
+        if (!await this.validateEditorState(editor, pendingMessage)) {
+            return;
+        }
+
+        const formattedResponse = formatResponse(response);
+        const [segments, segmentOrder] = this.segmentMessage(formattedResponse, pendingMessage.position);
+        
+        pendingMessage.segments = segments;
+        pendingMessage.editorState.segmentOrder = segmentOrder;
+
+        for (const segmentId of segmentOrder) {
+            const segment = segments.get(segmentId)!;
+            const position = await this.processSegment(
+                editor,
+                segment,
+                segment.position,
+                needsClosingTag,
+                commentChar,
+                pendingMessage
+            );
+
+            if (position) {
+                segment.written = true;
+                segment.writtenPosition = position;
+                pendingMessage.editorState.lastProcessedSegmentId = segmentId;
+            } else {
+                break;
+            }
+        }
+
+        pendingMessage.editorState.contentComplete = 
+            pendingMessage.editorState.lastProcessedSegmentId === segmentOrder[segmentOrder.length - 1];
     }
 }
+
+export const messageStateManager = new MessageStateManager();
+
+// Main response handler
+interface ChunkState {
+    text: string;
+    isRendered: boolean;
+    position: vscode.Position;
+    lineContent?: string;
+}
+
+interface MessageRenderState {
+    id: string;
+    chunks: ChunkState[];
+    currentChunkIndex: number;
+    isComplete: boolean;
+    headerPosition?: vscode.Position;
+    documentUri: string;
+    decorations: {
+        blueMarker: vscode.TextEditorDecorationType;
+        whiteText: vscode.TextEditorDecorationType;
+    };
+}
+
+class MessageRenderer {
+    private static CHUNK_SIZE = 50;
+    private static RENDER_DELAY = 10;
+    private static instance: MessageRenderer;
+    private renderStates: Map<string, MessageRenderState> = new Map();
+    private activeRendering: Set<string> = new Set();
+    private isDisposed = false;
+
+    private constructor() {
+        // Handle editor changes
+        vscode.window.onDidChangeActiveTextEditor(this.handleEditorChange.bind(this));
+        
+        // Cleanup on deactivation
+        this.setupCleanup();
+    }
+
+    private setupCleanup() {
+        // Ensure cleanup when extension is deactivated
+        if (vscode.extensions.all.length > 0) {
+            const extension = vscode.extensions.all[0];
+            if (extension.activate) {
+                extension.activate().then(() => {
+                    extension.exports?.deactivate?.(() => {
+                        this.dispose();
+                    });
+                });
+            }
+        }
+    }
+
+    static getInstance(): MessageRenderer {
+        if (!MessageRenderer.instance) {
+            MessageRenderer.instance = new MessageRenderer();
+        }
+        return MessageRenderer.instance;
+    }
+
+    private async handleEditorChange(editor: vscode.TextEditor | undefined) {
+        if (!editor) {return;}
+
+        const documentId = editor.document.uri.toString();
+        const state = this.renderStates.get(documentId);
+
+        if (state && !state.isComplete) {
+            await this.validateAndResume(editor, documentId);
+        }
+    }
+
+    private async validateAndResume(editor: vscode.TextEditor, documentId: string) {
+        const state = this.renderStates.get(documentId);
+        if (!state || this.activeRendering.has(documentId)) {return;}
+
+        try {
+            // Validate existing content before resuming
+            const validationResult = await this.validateContent(editor, state);
+            if (validationResult.isValid) {
+                await this.resumeRendering(editor, documentId);
+            } else {
+                // Content is invalid - need to restart from last valid point
+                await this.restartFromValidPoint(editor, state, validationResult.lastValidIndex);
+            }
+        } catch (error) {
+            console.error('Error during validation and resume:', error);
+            if (error instanceof Error && error.message.includes('closed editors')) {
+                this.renderStates.delete(documentId);
+            }
+        }
+    }
+
+    private async validateContent(
+        editor: vscode.TextEditor,
+        state: MessageRenderState
+    ): Promise<{ isValid: boolean; lastValidIndex: number }> {
+        let lastValidIndex = -1;
+
+        try {
+            for (let i = 0; i < state.currentChunkIndex; i++) {
+                const chunk = state.chunks[i];
+                if (!chunk.isRendered) {continue;}
+
+                const line = editor.document.lineAt(chunk.position.line);
+                const expectedContent = chunk.lineContent || chunk.text;
+                
+                if (line.text.includes(expectedContent)) {
+                    lastValidIndex = i;
+                } else {
+                    break;
+                }
+            }
+        } catch (error) {
+            console.error('Error during content validation:', error);
+        }
+
+        return {
+            isValid: lastValidIndex === state.currentChunkIndex - 1,
+            lastValidIndex: Math.max(0, lastValidIndex)
+        };
+    }
+
+    private async restartFromValidPoint(
+        editor: vscode.TextEditor,
+        state: MessageRenderState,
+        lastValidIndex: number
+    ) {
+        // Reset state to last valid point
+        state.currentChunkIndex = lastValidIndex;
+        
+        // Mark subsequent chunks as not rendered
+        for (let i = lastValidIndex + 1; i < state.chunks.length; i++) {
+            state.chunks[i].isRendered = false;
+        }
+
+        // Resume rendering
+        await this.resumeRendering(editor, editor.document.uri.toString());
+    }
+
+    private async resumeRendering(editor: vscode.TextEditor, documentId: string) {
+        const state = this.renderStates.get(documentId);
+        if (!state || this.activeRendering.has(documentId)) {return;}
+
+        this.activeRendering.add(documentId);
+
+        try {
+            for (let i = state.currentChunkIndex; i < state.chunks.length; i++) {
+                const chunk = state.chunks[i];
+                if (this.isDisposed || !this.isEditorValid(editor)) {
+                    this.activeRendering.delete(documentId);
+                    return;
+                }
+
+                if (!chunk.isRendered) {
+                    const success = await this.renderChunkSafely(editor, chunk, state);
+                    if (!success) {
+                        this.activeRendering.delete(documentId);
+                        return;
+                    }
+                    state.currentChunkIndex = i + 1;
+                    await new Promise(resolve => setTimeout(resolve, MessageRenderer.RENDER_DELAY));
+                }
+            }
+
+            if (state.currentChunkIndex >= state.chunks.length) {
+                state.isComplete = true;
+                await this.appendFooterSafely(editor, state);
+            }
+        } finally {
+            this.activeRendering.delete(documentId);
+        }
+    }
+
+    private isEditorValid(editor: vscode.TextEditor): boolean {
+        return !!(editor && 
+                 editor.document && 
+                 !editor.document.isClosed && 
+                 editor === vscode.window.activeTextEditor);
+    }
+
+    private async renderChunkSafely(
+        editor: vscode.TextEditor,
+        chunk: ChunkState,
+        state: MessageRenderState
+    ): Promise<boolean> {
+        try {
+            if (!this.isEditorValid(editor)) {return false;}
+
+            await editor.edit(editBuilder => {
+                editBuilder.insert(chunk.position, chunk.text);
+            });
+            
+            chunk.isRendered = true;
+            chunk.lineContent = editor.document.lineAt(chunk.position.line).text;
+            return true;
+        } catch (error) {
+            console.error('Error rendering chunk:', error);
+            return false;
+        }
+    }
+
+    private async appendFooterSafely(
+        editor: vscode.TextEditor,
+        state: MessageRenderState
+    ) {
+        try {
+            if (!this.isEditorValid(editor)) {return;}
+
+            const lastChunk = state.chunks[state.chunks.length - 1];
+            await editor.edit(editBuilder => {
+                editBuilder.insert(lastChunk.position, '\n');
+            });
+
+            this.updateDecorations(editor, state);
+        } catch (error) {
+            console.error('Error appending footer:', error);
+        }
+    }
+
+    async startRendering(
+        editor: vscode.TextEditor,
+        response: string,
+        startPosition: vscode.Position
+    ): Promise<void> {
+        const documentId = editor.document.uri.toString();
+        
+        // Create new render state
+        const state: MessageRenderState = {
+            id: `msg-${Date.now()}`,
+            chunks: this.createChunks(response, startPosition),
+            currentChunkIndex: 0,
+            isComplete: false,
+            documentUri: documentId,
+            decorations: {
+                blueMarker: vscode.window.createTextEditorDecorationType({
+                    color: new vscode.ThemeColor('editorInfo.foreground')
+                }),
+                whiteText: vscode.window.createTextEditorDecorationType({
+                    color: new vscode.ThemeColor('editor.foreground')
+                })
+            }
+        };
+
+        this.renderStates.set(documentId, state);
+        await this.resumeRendering(editor, documentId);
+    }
+
+    private createChunks(text: string, startPosition: vscode.Position): ChunkState[] {
+        const lines = text.split('\n');
+        const chunks: ChunkState[] = [];
+        let currentPosition = startPosition;
+
+        for (const line of lines) {
+            chunks.push({
+                text: line + '\n',
+                isRendered: false,
+                position: currentPosition
+            });
+            currentPosition = new vscode.Position(currentPosition.line + 1, 0);
+        }
+
+        return chunks;
+    }
+
+    private updateDecorations(editor: vscode.TextEditor, state: MessageRenderState) {
+        if (!this.isEditorValid(editor)) {return;}
+
+        const startLine = state.chunks[0].position.line;
+        const endLine = state.chunks[state.chunks.length - 1].position.line;
+        
+        const contentRange = new vscode.Range(
+            new vscode.Position(startLine, 0),
+            new vscode.Position(endLine, Number.MAX_VALUE)
+        );
+
+        editor.setDecorations(state.decorations.whiteText, [contentRange]);
+    }
+
+    dispose() {
+        this.isDisposed = true;
+        for (const state of this.renderStates.values()) {
+            state.decorations.blueMarker.dispose();
+            state.decorations.whiteText.dispose();
+        }
+        this.renderStates.clear();
+        this.activeRendering.clear();
+    }
+
+    cleanup(documentId: string) {
+        const state = this.renderStates.get(documentId);
+        if (state) {
+            state.decorations.blueMarker.dispose();
+            state.decorations.whiteText.dispose();
+            this.renderStates.delete(documentId);
+        }
+    }
+}
+
+// Updated appendResponseToFile function
+async function appendResponseToFile(
+    editor: vscode.TextEditor,
+    response: string,
+    animationControl: AnimationControl,
+    fileType: string
+): Promise<void> {
+    try {
+        await editor.edit(editBuilder => {
+            editBuilder.delete(animationControl.animationRange);
+        });
+
+        const renderer = MessageRenderer.getInstance();
+        await renderer.startRendering(
+            editor,
+            formatResponse(response),
+            new vscode.Position(animationControl.insertPosition.line, 0)
+        );
+    } catch (error) {
+        console.error('Error in appendResponseToFile:', error);
+        vscode.window.showErrorMessage('Failed to render response. Please try again.');
+    }
+}
+
 
 function formatResponse(response: string | undefined): string {
     if (!response) {
