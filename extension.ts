@@ -1,9 +1,11 @@
+//extension.ts
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { window, commands, workspace, ExtensionContext, ConfigurationTarget } from 'vscode';
 import { startLocalModelSetup } from './localModelSetup';
+import { UiChatViewProvider } from './uiChat';
 import {
     startup, updateModelList, getAvailableModels, handleChat, extractCodeFromLastResponse,
     handleChatNotebook, handleTextDocumentChange, handleNotebookDocumentChange,
@@ -23,6 +25,18 @@ export async function activate(context: ExtensionContext) {
         await updateModelList();
         registerCommands(context);
         startup();
+
+
+        const uiChatViewProvider = new UiChatViewProvider(context.extensionUri);
+        context.subscriptions.push(
+            vscode.window.registerWebviewViewProvider('promptly-chat-view', uiChatViewProvider)
+        );
+    
+        const openUiChatCommand = vscode.commands.registerCommand('promptly.openUiChat', () => {
+            vscode.commands.executeCommand('workbench.view.extension.promptly-chat');
+        });
+        context.subscriptions.push(openUiChatCommand);
+    
 
         activePromptStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
         activePromptStatusBarItem.command = 'promptly.selectActivePrompt';
