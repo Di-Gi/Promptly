@@ -1,9 +1,11 @@
-// localModelSetup.ts
+// trace\src\localModelSetup.ts
+
 
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { exec, spawn } from 'child_process';
+import { resetLocalModelPort } from './serverService';
 
 let localModelPort: number | null = null;
 
@@ -220,8 +222,9 @@ async function selectModelOption(): Promise<string | undefined> {
     const recentCustomModels = getRecentCustomModels();
     
     const options = [
-        { label: 'Llama 3', description: 'Latest version of Llama', id: 'meta-llama/Meta-Llama-3.1-8B-Instruct' },
-        { label: 'Mixtral', description: 'Mixture of Experts model', id: 'mistralai/Mixtral-8x7B-Instruct-v0.1' },
+        { label: 'Qwen/Qwen2.5-7B', description: '7.62B parameters', id: 'Qwen/Qwen2.5-7B' },
+        { label: 'Qwen/Qwen2.5-32B', description: '32.8B parameters', id: 'Qwen/Qwen2.5-32B' },
+        { label: 'Qwen/Qwen2.5-72B', description: '72.7B parameters', id: 'Qwen/Qwen2.5-72B' },
         { label: 'Custom HuggingFace Model', description: 'Specify your own model', id: 'custom' },
         ...recentCustomModels.map(model => ({
             label: `Recent: ${model.id}`,
@@ -229,6 +232,7 @@ async function selectModelOption(): Promise<string | undefined> {
             id: `recent:${model.id}`
         }))
     ];
+    
 
     const selected = await vscode.window.showQuickPick(options, {
         placeHolder: 'Select a model to install or choose custom',
@@ -552,8 +556,8 @@ if __name__ == "__main__":
                         if (portMatch) {
                             serverPort = parseInt(portMatch[1], 10);
                             console.log(`Server port detected: ${serverPort}`);
-                            vscode.window.showInformationMessage(`Model server is starting on port ${serverPort}...`);
-                            setLocalModelPort(serverPort);
+                            setLocalModelPort(serverPort); // <--- Set the port via the service
+                            vscode.window.showInformationMessage(`Model server starting on port ${serverPort}...`);
                         }
                         
                         if (output.includes('Model downloaded and loaded successfully')) {
@@ -585,6 +589,7 @@ if __name__ == "__main__":
                     console.error(errorMessage);
                     outputChannel.appendLine(errorMessage);
                     vscode.window.showErrorMessage(errorMessage);
+                    resetLocalModelPort(); // <--- Reset port on failure
                     resolve(false);
                 });
     

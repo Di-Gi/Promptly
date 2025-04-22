@@ -1,4 +1,5 @@
-// workspaceUtils.ts
+// trace\src\workspaceUtils.ts
+
 
 import * as vscode from 'vscode';
 import * as path from 'path';
