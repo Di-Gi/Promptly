@@ -162,10 +162,10 @@ export async function handlePromptEnter(editor: TextEditor): Promise<unknown | n
     const document = editor.document;
     const currentLineNumber = editor.selection.active.line;
 
-     // Ensure line number is valid (might be outdated if doc changed rapidly)
-     if (currentLineNumber >= document.lineCount) {
-         return vscode.commands.executeCommand('default:type', { text: '\n' }); // Default action
-     }
+    // Ensure line number is valid (might be outdated if doc changed rapidly)
+    if (currentLineNumber >= document.lineCount) {
+        return undefined; // Allow default Enter behavior
+    }
 
     const line = document.lineAt(currentLineNumber);
     const lineText = line.text;
@@ -205,17 +205,17 @@ export async function handlePromptEnter(editor: TextEditor): Promise<unknown | n
         const markerIndex = lineText.indexOf(PROMPT_MARKER);
         if (markerIndex !== -1 && !lineText.substring(markerIndex).includes('-->')) {
             if (markerIndex <= line.firstNonWhitespaceCharacterIndex + 5) {
-                 isPromptLine = true;
-                 promptText = lineText.substring(markerIndex + promptMarkerLength).trim();
-             }
+                isPromptLine = true;
+                promptText = lineText.substring(markerIndex + promptMarkerLength).trim();
+            }
         }
     }
 
     if (isPromptLine) {
-         // Clear the prompt line *before* sending the request
-         await editor.edit(editBuilder => {
-             editBuilder.delete(line.range);
-         });
+        // Clear the prompt line *before* sending the request
+        await editor.edit(editBuilder => {
+            editBuilder.delete(line.range);
+        });
         if (promptText) {
             await handleChat(promptText); // Pass only the text after the marker
         } else {
@@ -228,6 +228,6 @@ export async function handlePromptEnter(editor: TextEditor): Promise<unknown | n
         return null; // Suppress default Enter
     }
 
-    // 3. Default Action: If neither command nor prompt, execute default Enter behavior
-    return vscode.commands.executeCommand('default:type', { text: '\n' });
+    // 3. Default Action: If neither command nor prompt, let VS Code handle it
+    return undefined; // Allow default Enter behavior
 }
